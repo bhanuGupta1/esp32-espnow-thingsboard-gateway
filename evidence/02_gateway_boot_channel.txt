@@ -1,0 +1,45 @@
+﻿ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:1
+load:0x3fff0030,len:4980
+load:0x40078000,len:16612
+load:0x40080400,len:3480
+entry 0x400805b4
+E (323) esp_core_f^[}?????? Incorrect size of core dump image: 1869639017
+
+[GATEWAY] ============================================
+[GATEWAY] 05_board2_gateway_cloud
+[GATEWAY] ============================================
+[GATEWAY] packet size = 26 bytes (ESP-NOW limit is 250)
+[GATEWAY] connecting to "eduroam" (WPA2-Enterprise, PEAP) ...
+[GATEWAY] outer identity = [REDACTED]@op.ac.nz
+......
+[GATEWAY] Wi-Fi connected
+[GATEWAY] station MAC = 44:1D:64:F4:F1:C8
+[GATEWAY] ip=10.33.x.x [REDACTED]  rssi=-74 dBm
+[GATEWAY] --------------------------------------------------------
+[GATEWAY] ACTIVE 2.4 GHz CHANNEL = 1
+[GATEWAY] Put this in sketch 04: ESPNOW_CHANNEL = 1
+[GATEWAY] --------------------------------------------------------
+[GATEWAY] ESP-NOW listening on channel 1, expecting 26 byte packets
+[GATEWAY] MQTT target thingsboard.cloud:1883 topic v1/devices/me/telemetry client_id p1gw-441D64F4F1C8
+[GATEWAY] publishing every 10000 ms, node goes stale after 20000 ms
+[GATEWAY] MQTT connecting to thingsboard.cloud:1883 ...
+[GATEWAY] MQTT connected
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=475 boot_id=3341876646 temperature=26.7 C humidity=39.0 % node_uptime=2375024 ms ttl=3 hops=0
+[GATEWAY] local_ok=yes  node1_online=yes  node1_age=4227 ms  received=1  duplicates=0  invalid=0
+[GATEWAY] MQTT published 231 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":26.7,"node1_humidity":39.0,"node1_sequence":475,"node1_age_ms":4227,"node1_online":true,"duplicate_count":0,"espnow_received_count":1}
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=476 boot_id=3341876646 temperature=27.1 C humidity=39.0 % node_uptime=2380024 ms ttl=3 hops=0
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=477 boot_id=3341876646 temperature=27.1 C humidity=39.0 % node_uptime=2385024 ms ttl=3 hops=0
+[GATEWAY] local_ok=yes  node1_online=yes  node1_age=4227 ms  received=3  duplicates=0  invalid=0
+[GATEWAY] MQTT published 231 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":27.1,"node1_humidity":39.0,"node1_sequence":477,"node1_age_ms":4227,"node1_online":true,"duplicate_count":0,"espnow_received_count":3}
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=478 boot_id=3341876646 temperature=27.1 C humidity=39.0 % node_uptime=2390024 ms ttl=3 hops=0
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=479 boot_id=3341876646 temperature=27.1 C humidity=38.0 % node_uptime=2395024 ms ttl=3 hops=0
+[GATEWAY] local_ok=yes  node1_online=yes  node1_age=4227 ms  received=5  duplicates=0  invalid=0
+[GATEWAY] MQTT published 231 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":27.1,"node1_humidity":38.0,"node1_sequence":479,"node1_age_ms":4227,"node1_online":true,"duplicate_count":0,"espnow_received_count":5}
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=480 boot_id=3341876646 temperature=27.1 C humidity=38.0 % node_uptime=2400024 ms ttl=3 hops=0
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=481 boot_id=3341876646 temperature=27.1 C humidity=38.0 % node_uptime=2405024 ms ttl=3 hops=0
+

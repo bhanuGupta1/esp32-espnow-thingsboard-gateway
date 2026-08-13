@@ -1,0 +1,9 @@
+﻿[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=11 boot_id=1621853947 temperature=28.0 C humidity=36.0 % node_uptime=55024 ms ttl=3 hops=0
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=12 boot_id=1621853947 temperature=28.0 C humidity=36.0 % node_uptime=60024 ms ttl=3 hops=0
+[GATEWAY] local_ok=yes  node1_online=yes  node1_age=686 ms  received=76  duplicates=0  invalid=0
+[GATEWAY] MQTT published 230 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.0,"node1_humidity":36.0,"node1_sequence":12,"node1_age_ms":686,"node1_online":true,"duplicate_count":0,"espnow_received_count":76}
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=13 boot_id=1621853947 temperature=28.0 C humidity=36.0 % node_uptime=65024 ms ttl=3 hops=0
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=14 boot_id=1621853947 temperature=28.5 C humidity=35.0 % node_uptime=70024 ms ttl=3 hops=0
+[GATEWAY] local_ok=yes  node1_online=yes  node1_age=686 ms  received=78  duplicates=0  invalid=0
+[GATEWAY] MQTT published 230 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.5,"node1_humidity":35.0,"node1_sequence":14,"node1_age_ms":686,"node1_online":true,"duplicate_count":0,"espnow_received_count":78}
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=15 boot_id=1621853947 temperature=28.5 C humidity=35.0 % node_uptime=75024 ms ttl=3 hops=0

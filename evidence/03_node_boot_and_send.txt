@@ -1,0 +1,36 @@
+﻿ets Jul 29 2019 12:21:46
+
+rst:0x1 (POWERON_RESET),boot:0x17 (SPI_FAST_FLASH_BOOT)
+configsip: 0, SPIWP:0xee
+clk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00
+mode:DIO, clock div:1
+load:0x3fff0030,len:4980
+load:0x40078000,len:16612
+load:0x40080400,len:3480
+entry 0x400805b4
+E (293) esp_core_?f~mp_flash: Core dump data check failed:
+Calculated checksum='6746e384'
+Image checks
+[NODE] ============================================
+[NODE] 04_board1_espnow_sender
+[NODE] ============================================
+[NODE] boot_id = 1621853947
+[NODE] packet size = 26 bytes (ESP-NOW limit is 250)
+[NODE] channel requested=1 actual=1
+[NODE] own station MAC = 44:1D:64:F5:FA:24
+[NODE] Wi-Fi association: none (by design), status=6
+[NODE] ESP-NOW initialised
+[NODE] gateway peer added: 44:1D:64:F4:F1:C8 on channel 1
+[NODE] sending every 5000 ms
+[NODE] tx seq=1 temperature=28.0 C humidity=37.0 % uptime=5024 ms
+[NODE] send to 44:1D:64:F4:F1:C8 : OK (link-layer ack received)
+[NODE] tx seq=2 temperature=28.0 C humidity=37.0 % uptime=10024 ms
+[NODE] send to 44:1D:64:F4:F1:C8 : OK (link-layer ack received)
+[NODE] tx seq=3 temperature=28.0 C humidity=37.0 % uptime=15024 ms
+[NODE] send to 44:1D:64:F4:F1:C8 : OK (link-layer ack received)
+[NODE] tx seq=4 temperature=28.0 C humidity=37.0 % uptime=20024 ms
+[NODE] send to 44:1D:64:F4:F1:C8 : OK (link-layer ack received)
+[NODE] tx seq=5 temperature=28.0 C humidity=37.0 % uptime=25024 ms
+[NODE] send to 44:1D:64:F4:F1:C8 : OK (link-layer ack received)
+[NODE] tx seq=6 temperature=28.0 C humidity=36.0 % uptime=30024 ms
+[NODE] send to 44:1D:64:F4:F1:C8 : OK (link-layer ack received)

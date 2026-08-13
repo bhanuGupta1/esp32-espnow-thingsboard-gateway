@@ -1,0 +1,706 @@
+/*
+ * 05_board2_gateway_cloud - Board 2 (Root Gateway + Local Sensor)
+ *
+ * Stage 5 of the P1 project, and the sketch that runs during the demonstration.
+ * Board 2 does four jobs at once:
+ *
+ *   1. joins the 2.4 GHz access point, which is what gives it a cloud path
+ *   2. receives ESP-NOW sensor packets from Board 1 and deduplicates them
+ *   3. reads its own local DHT11
+ *   4. merges local and remote readings into one JSON payload and publishes it
+ *      to ThingsBoard over MQTT
+ *
+ * Board:  ESP32 Dev Module      (FQBN esp32:esp32:esp32)
+ * Serial: 115200
+ * Sensor: DHT11 on GPIO5 (silkscreen D5)
+ *
+ * Order of operations matters
+ * ---------------------------
+ * Wi-Fi is brought up FIRST, then ESP-NOW. An ESP32 has one radio and therefore
+ * one channel. Once the station associates, the access point owns that channel
+ * and it cannot be overridden without dropping the connection. So the channel is
+ * a value this sketch DISCOVERS and reports, not one it chooses. Whatever
+ * channel it prints must be typed into sketch 04 on Board 1.
+ *
+ * Copy secrets.example.h to secrets.h in this folder and fill it in before
+ * uploading. secrets.h is gitignored.
+ *
+ * Upload this to BOARD 2, not Board 1.
+ */
+
+#include <WiFi.h>
+#include <esp_wifi.h>
+#include <esp_now.h>
+#include <PubSubClient.h>
+#include <stdarg.h>
+#include "DHT.h"
+#include "secrets.h"
+
+// ===========================================================================
+// CONFIG
+// ===========================================================================
+
+static const uint8_t  DHT_PIN                = 5;      // GPIO5, silkscreen D5
+static const uint8_t  DHT_KIND               = DHT11;
+
+static const uint32_t LOCAL_READ_INTERVAL_MS = 2000;   // DHT11 needs >= 1000 ms
+static const uint32_t PUBLISH_INTERVAL_MS    = 10000;  // MQTT telemetry cadence
+static const uint32_t NODE_STALE_TIMEOUT_MS  = 20000;  // Board 1 declared offline after this
+
+static const uint32_t WIFI_RETRY_MS          = 5000;
+static const uint32_t MQTT_RETRY_MS          = 5000;
+static const uint32_t WIFI_BOOT_TIMEOUT_MS   = 30000;
+
+// MQTT. ThingsBoard uses the device access token as the username and an empty
+// password. Port 1883 is plain MQTT, which is what the classroom setup uses.
+static const uint16_t MQTT_PORT  = 1883;
+static const char    *MQTT_TOPIC = "v1/devices/me/telemetry";
+
+// Plausibility bounds for incoming sensor values. Deliberately wider than the
+// DHT11's own rated range so a cold room or a dry day is not rejected as
+// corrupt. Tighten these if you want stricter validation.
+static const float TEMP_MIN_C   = -40.0f;
+static const float TEMP_MAX_C   =  80.0f;
+static const float HUM_MIN_PCT  =   0.0f;
+static const float HUM_MAX_PCT  = 100.0f;
+
+// Guard against isDuplicate() being reduced to a stub again. While this is 0 the
+// sketch prints a warning at boot, because a stub accepts every packet and
+// duplicate_count would never move off zero.
+#define DEDUP_IMPLEMENTED 1
+
+// ===========================================================================
+// Mesh packet - MUST stay byte-identical to the copy in sketch 04
+// ===========================================================================
+
+static const uint8_t PROTO_VERSION   = 1;
+static const uint8_t MSG_SENSOR_DATA = 1;
+static const uint8_t NODE_ID         = 1;  // Board 1
+static const uint8_t ROOT_ID         = 0;  // this board
+
+#pragma pack(push, 1)
+typedef struct {
+  uint8_t  version;
+  uint8_t  msg_type;
+  uint8_t  src_id;
+  uint8_t  dst_id;
+  uint32_t boot_id;
+  uint32_t seq;
+  uint8_t  ttl;
+  uint8_t  hop_count;
+  float    temperature_c;
+  float    humidity_pct;
+  uint32_t uptime_ms;
+} mesh_packet_t;
+#pragma pack(pop)
+
+static_assert(sizeof(mesh_packet_t) == 26, "mesh_packet_t layout changed, update sketch 04 to match");
+
+// What actually travels through the queue: the validated packet plus the MAC it
+// arrived from, so the log line can name the sender.
+typedef struct {
+  mesh_packet_t pkt;
+  uint8_t       src_mac[6];
+} rx_item_t;
+
+// ===========================================================================
+// State
+// ===========================================================================
+
+DHT dht(DHT_PIN, DHT_KIND);
+
+WiFiClient   netClient;
+PubSubClient mqtt(netClient);
+
+static char     mqttClientId[32] = {0};
+
+// The channel the access point put us on. Board 1 must be pinned to this.
+static uint8_t  espnowChannel  = 0;
+
+// Handoff from the ESP-NOW receive callback to loop(). A FreeRTOS queue is used
+// rather than a shared struct plus a flag because the callback runs in the Wi-Fi
+// task while loop() runs in the Arduino task. The queue gives correct
+// cross-task handoff without hand-rolled locking, and its small depth absorbs a
+// burst without dropping anything.
+static QueueHandle_t rxQueue = nullptr;
+
+// Written by the callback, read by loop(). Single writer, so a plain volatile
+// counter is sufficient here.
+static volatile uint32_t rxInvalidCount   = 0;
+static volatile uint32_t rxQueueFullCount = 0;
+
+// Telemetry counters.
+static uint32_t espnowReceivedCount = 0;  // packets that passed validation
+static uint32_t duplicateCount      = 0;  // of those, rejected as duplicates
+
+// Last known good remote reading. Kept after Board 1 goes offline so dashboard
+// widgets do not blank out; node1_online carries the truth about freshness.
+static bool     node1HaveEver  = false;
+static float    node1T         = 0.0f;
+static float    node1H         = 0.0f;
+static uint32_t node1Seq       = 0;
+static uint32_t node1LastRxMs  = 0;
+
+// Last known good local reading, plus whether the most recent attempt worked.
+static bool  localHaveEver = false;
+static bool  localOk       = false;
+static float localT        = 0.0f;
+static float localH        = 0.0f;
+
+// Scheduling.
+static uint32_t lastLocalReadMs = 0;
+static uint32_t lastPublishMs   = 0;
+static uint32_t lastWifiTryMs   = 0;
+static uint32_t lastMqttTryMs   = 0;
+static bool     wasWifiUp       = false;
+
+// ---------------------------------------------------------------------------
+// Duplicate detection state
+// ---------------------------------------------------------------------------
+//
+// The dedup key is (src_id, boot_id, seq). boot_id is the important part: it is
+// randomised every time Board 1 powers up, so when Board 1 restarts and its
+// sequence numbers drop back to 1, the gateway can tell that apart from an old
+// packet being replayed. With only one remote node there is a single slot; a
+// larger mesh would make this an array indexed by src_id.
+typedef struct {
+  bool     seen;
+  uint32_t boot_id;
+  uint32_t last_seq;
+} remote_state_t;
+
+static remote_state_t node1State = { false, 0, 0 };
+
+// ===========================================================================
+// Duplicate detection
+// ===========================================================================
+//
+// Strategy: strict last-sequence-wins. ESP-NOW unicast is acknowledged at the
+// link layer and does not reorder in a two-radio link, so anything at or below
+// the highest sequence number already accepted in this session is a
+// retransmission rather than a late arrival. A sliding window would tolerate
+// reordering, but nothing here reorders, and the extra state would be solving a
+// problem this link does not have.
+//
+// The boot_id branch is the part that is not optional. Board 1 randomises
+// boot_id on every power-up and restarts its sequence numbering at 1. Without
+// that branch, restarting Board 1 would make every subsequent packet look like
+// a replay of something already seen, and the node would never come back.
+//
+// Called only from processReceivedPackets() on the Arduino task, so node1State
+// needs no locking.
+static bool isDuplicate(const mesh_packet_t &pkt) {
+  if (!node1State.seen || node1State.boot_id != pkt.boot_id) {
+    // First packet ever, or Board 1 rebooted. Either way this is a new session
+    // and its sequence numbering starts fresh, so accept and rebase.
+    node1State.seen     = true;
+    node1State.boot_id  = pkt.boot_id;
+    node1State.last_seq = pkt.seq;
+    return false;
+  }
+
+  if (pkt.seq <= node1State.last_seq) {
+    return true;  // already seen this sequence number in this session
+  }
+
+  // A jump forward is a gap, not a duplicate: those packets were lost, not
+  // repeated. Accept and move the baseline up.
+  node1State.last_seq = pkt.seq;
+  return false;
+}
+
+// ===========================================================================
+// ESP-NOW
+// ===========================================================================
+
+static void macToString(const uint8_t *mac, char *out, size_t outLen) {
+  snprintf(out, outLen, "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+// Full validation of a raw ESP-NOW frame. Cheap, allocation-free, and safe to
+// run inside the receive callback.
+static bool validatePacket(const uint8_t *data, int len, mesh_packet_t &out) {
+  if (data == nullptr) {
+    return false;
+  }
+  // Exact length, not "at least". A short frame would read past the buffer and a
+  // long one means the sender is speaking a different protocol.
+  if (len != (int)sizeof(mesh_packet_t)) {
+    return false;
+  }
+  memcpy(&out, data, sizeof(out));
+
+  if (out.version  != PROTO_VERSION)   return false;
+  if (out.msg_type != MSG_SENSOR_DATA) return false;
+  if (out.dst_id   != ROOT_ID)         return false;
+  if (out.src_id   != NODE_ID)         return false;
+
+  if (isnan(out.temperature_c) || isnan(out.humidity_pct)) return false;
+  if (out.temperature_c < TEMP_MIN_C  || out.temperature_c > TEMP_MAX_C)  return false;
+  if (out.humidity_pct  < HUM_MIN_PCT || out.humidity_pct  > HUM_MAX_PCT) return false;
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// ESP-NOW receive callback
+//
+// IMPORTANT: this signature is specific to the installed core. arduino-esp32
+// 3.3.x is built on ESP-IDF 5.5, where the sender MAC arrives inside
+// esp_now_recv_info_t rather than as a bare uint8_t pointer. Older tutorials use
+// the old form and will not compile against this core.
+//
+// This runs in the Wi-Fi task. It validates, copies, and hands off. No MQTT, no
+// sensor reads, no delays, no Serial output: blocking here starves the Wi-Fi
+// stack, drops subsequent frames, and can trip the task watchdog.
+// ---------------------------------------------------------------------------
+static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+  rx_item_t item;
+
+  if (!validatePacket(data, len, item.pkt)) {
+    rxInvalidCount++;
+    return;
+  }
+
+  if (info != nullptr && info->src_addr != nullptr) {
+    memcpy(item.src_mac, info->src_addr, 6);
+  } else {
+    memset(item.src_mac, 0, 6);
+  }
+
+  if (xQueueSend(rxQueue, &item, 0) != pdTRUE) {
+    rxQueueFullCount++;
+  }
+}
+
+// Drain everything the callback handed over. Deduplication, bookkeeping and
+// printing all happen here, on the Arduino task, where blocking is harmless.
+static void processReceivedPackets() {
+  rx_item_t item;
+
+  while (xQueueReceive(rxQueue, &item, 0) == pdTRUE) {
+    espnowReceivedCount++;
+
+    char macStr[18];
+    macToString(item.src_mac, macStr, sizeof(macStr));
+
+    if (isDuplicate(item.pkt)) {
+      duplicateCount++;
+      Serial.printf("[GATEWAY] DUPLICATE rejected  node=%u boot_id=%lu seq=%lu  duplicates=%lu\n",
+                    item.pkt.src_id,
+                    (unsigned long)item.pkt.boot_id,
+                    (unsigned long)item.pkt.seq,
+                    (unsigned long)duplicateCount);
+      continue;
+    }
+
+    node1HaveEver = true;
+    node1T        = item.pkt.temperature_c;
+    node1H        = item.pkt.humidity_pct;
+    node1Seq      = item.pkt.seq;
+    node1LastRxMs = millis();
+
+    Serial.printf("[GATEWAY] ESP-NOW rx from %s  node=%u seq=%lu boot_id=%lu "
+                  "temperature=%.1f C humidity=%.1f %% node_uptime=%lu ms ttl=%u hops=%u\n",
+                  macStr,
+                  item.pkt.src_id,
+                  (unsigned long)item.pkt.seq,
+                  (unsigned long)item.pkt.boot_id,
+                  item.pkt.temperature_c,
+                  item.pkt.humidity_pct,
+                  (unsigned long)item.pkt.uptime_ms,
+                  item.pkt.ttl,
+                  item.pkt.hop_count);
+  }
+}
+
+static void setupEspNow() {
+  rxQueue = xQueueCreate(8, sizeof(rx_item_t));
+  if (rxQueue == nullptr) {
+    Serial.println("[GATEWAY] xQueueCreate failed - halting");
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  esp_err_t err = esp_now_init();
+  if (err != ESP_OK) {
+    Serial.printf("[GATEWAY] esp_now_init failed: %s - halting\n", esp_err_to_name(err));
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  err = esp_now_register_recv_cb(onEspNowRecv);
+  if (err != ESP_OK) {
+    Serial.printf("[GATEWAY] esp_now_register_recv_cb failed: %s\n", esp_err_to_name(err));
+  }
+
+  // No peer registration here on purpose. The gateway only ever receives, and
+  // unencrypted ESP-NOW accepts frames from senders that are not registered as
+  // peers. Board 1 is the side that needs a peer entry, because it transmits.
+  Serial.printf("[GATEWAY] ESP-NOW listening on channel %u, expecting %u byte packets\n",
+                espnowChannel, (unsigned)sizeof(mesh_packet_t));
+}
+
+// ===========================================================================
+// Wi-Fi
+// ===========================================================================
+
+static uint8_t currentChannel() {
+  uint8_t channel = 0;
+  wifi_second_chan_t secondary = WIFI_SECOND_CHAN_NONE;
+  esp_wifi_get_channel(&channel, &secondary);
+  return channel;
+}
+
+static void reportWifi() {
+  uint8_t mac[6] = {0};
+  esp_wifi_get_mac(WIFI_IF_STA, mac);
+  char macStr[18];
+  macToString(mac, macStr, sizeof(macStr));
+
+  Serial.printf("[GATEWAY] station MAC = %s\n", macStr);
+  Serial.printf("[GATEWAY] ip=%s  rssi=%d dBm\n",
+                WiFi.localIP().toString().c_str(), WiFi.RSSI());
+  Serial.println("[GATEWAY] --------------------------------------------------------");
+  Serial.printf("[GATEWAY] ACTIVE 2.4 GHz CHANNEL = %u\n", espnowChannel);
+  Serial.printf("[GATEWAY] Put this in sketch 04: ESPNOW_CHANNEL = %u\n", espnowChannel);
+  Serial.println("[GATEWAY] --------------------------------------------------------");
+}
+
+static void setupWifi() {
+  WiFi.mode(WIFI_STA);
+
+  // Power save parks the radio between access point beacons. A parked radio does
+  // not hear ESP-NOW frames, so this line is the difference between receiving
+  // every packet and losing an unpredictable share of them.
+  WiFi.setSleep(false);
+
+#if WIFI_USE_ENTERPRISE
+  // WPA2-Enterprise, PEAP with MSCHAPv2 inside. This is what university
+  // networks such as eduroam use: there is no shared password, each user
+  // authenticates with their own account against a RADIUS server.
+  //
+  // The identity argument is the OUTER identity, sent unencrypted during the
+  // handshake. The username and password travel inside the TLS tunnel.
+  //
+  // The certificate arguments are left NULL, so the board does not verify the
+  // RADIUS server's certificate. That is what makes this connect at all without
+  // shipping a CA bundle, and it is also why this configuration would be
+  // unacceptable on a production device: a rogue access point advertising the
+  // same SSID could harvest the credentials.
+  Serial.printf("[GATEWAY] connecting to \"%s\" (WPA2-Enterprise, PEAP) ...\n", WIFI_SSID);
+  Serial.printf("[GATEWAY] outer identity = %s\n", WIFI_EAP_IDENTITY);
+  WiFi.begin(WIFI_SSID, WPA2_AUTH_PEAP,
+             WIFI_EAP_IDENTITY, WIFI_EAP_USERNAME, WIFI_EAP_PASSWORD);
+#else
+  Serial.printf("[GATEWAY] connecting to \"%s\" (WPA2-Personal) ...\n", WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#endif
+
+  uint32_t startedMs = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startedMs < WIFI_BOOT_TIMEOUT_MS) {
+    delay(500);
+    Serial.print('.');
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    espnowChannel = currentChannel();
+    wasWifiUp = true;
+    Serial.println("[GATEWAY] Wi-Fi connected");
+    reportWifi();
+    return;
+  }
+
+  // Carry on regardless. ESP-NOW does not need the access point, so the mesh
+  // half of the demonstration can still be shown while Wi-Fi keeps retrying in
+  // loop(). The channel is provisional until the association succeeds.
+  espnowChannel = currentChannel();
+  Serial.printf("[GATEWAY] Wi-Fi connect FAILED (status=%d). Retrying in the background.\n",
+                (int)WiFi.status());
+#if WIFI_USE_ENTERPRISE
+  Serial.println("[GATEWAY] Enterprise auth checks: identity, username and password in");
+  Serial.println("[GATEWAY] secrets.h; whether the account needs a domain suffix such as");
+  Serial.println("[GATEWAY] user@institution.ac.nz; and whether the network insists on");
+  Serial.println("[GATEWAY] server certificate validation, which this sketch does not do.");
+#else
+  Serial.println("[GATEWAY] Check: 2.4 GHz network, SSID spelling, password in secrets.h.");
+#endif
+  Serial.printf("[GATEWAY] Provisional channel is %u and may change once connected.\n",
+                espnowChannel);
+}
+
+static void ensureWifi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wasWifiUp) {
+      wasWifiUp = true;
+      uint8_t nowChannel = currentChannel();
+      Serial.println("[GATEWAY] Wi-Fi reconnected");
+
+      // A reconnect can land on a different channel, for example after the
+      // router does an automatic channel selection. Wi-Fi and MQTT then look
+      // perfectly healthy while ESP-NOW silently stops working, so it is worth
+      // saying so out loud.
+      if (nowChannel != espnowChannel) {
+        Serial.printf("[GATEWAY] WARNING channel changed %u -> %u\n",
+                      espnowChannel, nowChannel);
+        Serial.printf("[GATEWAY] ESP-NOW is now deaf to Board 1. Set ESPNOW_CHANNEL = %u\n",
+                      nowChannel);
+        Serial.println("[GATEWAY] in sketch 04 and re-upload it to Board 1.");
+        espnowChannel = nowChannel;
+      }
+      reportWifi();
+    }
+    return;
+  }
+
+  if (wasWifiUp) {
+    wasWifiUp = false;
+    Serial.println("[GATEWAY] Wi-Fi connection lost");
+  }
+
+  if (millis() - lastWifiTryMs < WIFI_RETRY_MS) {
+    return;
+  }
+  lastWifiTryMs = millis();
+
+  // Non-blocking retry. A blocking wait here would stall packet processing and
+  // the local sensor for as long as the network stayed down.
+  Serial.println("[GATEWAY] Wi-Fi down, attempting reconnect");
+  WiFi.reconnect();
+}
+
+// ===========================================================================
+// MQTT
+// ===========================================================================
+
+static void buildMqttClientId() {
+  uint8_t mac[6] = {0};
+  esp_wifi_get_mac(WIFI_IF_STA, mac);
+  snprintf(mqttClientId, sizeof(mqttClientId), "p1gw-%02X%02X%02X%02X%02X%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+static void setupMqtt() {
+  buildMqttClientId();
+  mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setKeepAlive(30);
+
+  // PubSubClient's default buffer is 256 bytes and it silently refuses to send
+  // anything larger: publish() just returns false and nothing reaches the
+  // broker. The combined payload is around 300 bytes, so this is required, not
+  // defensive.
+  if (!mqtt.setBufferSize(512)) {
+    Serial.println("[GATEWAY] WARNING setBufferSize(512) failed, telemetry may be dropped");
+  }
+
+  Serial.printf("[GATEWAY] MQTT target %s:%u topic %s client_id %s\n",
+                MQTT_HOST, MQTT_PORT, MQTT_TOPIC, mqttClientId);
+}
+
+static void ensureMqtt() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;  // nothing to do until the network is back
+  }
+  if (mqtt.connected()) {
+    return;
+  }
+  if (millis() - lastMqttTryMs < MQTT_RETRY_MS) {
+    return;
+  }
+  lastMqttTryMs = millis();
+
+  Serial.printf("[GATEWAY] MQTT connecting to %s:%u ...\n", MQTT_HOST, MQTT_PORT);
+
+  // ThingsBoard authentication: device access token as the username, empty
+  // password. There is no separate device identity beyond the token.
+  if (mqtt.connect(mqttClientId, THINGSBOARD_ACCESS_TOKEN, "")) {
+    Serial.println("[GATEWAY] MQTT connected");
+    return;
+  }
+
+  Serial.printf("[GATEWAY] MQTT connect FAILED, state=%d\n", mqtt.state());
+  Serial.println("[GATEWAY] state -2 = TCP refused (host or port wrong, or firewall)");
+  Serial.println("[GATEWAY] state  4 = bad credentials (check the access token)");
+  Serial.println("[GATEWAY] state  5 = not authorised (token not accepted by the device)");
+}
+
+// ===========================================================================
+// Local sensor
+// ===========================================================================
+
+static void readLocalSensor() {
+  if (millis() - lastLocalReadMs < LOCAL_READ_INTERVAL_MS) {
+    return;
+  }
+  lastLocalReadMs = millis();
+
+  float humidity    = dht.readHumidity();
+  float temperature = dht.readTemperature();
+
+  if (isnan(humidity) || isnan(temperature)) {
+    // Keep the previous good values but flag the sensor as unhealthy. The
+    // gateway_sensor_ok key is what tells the dashboard the truth.
+    localOk = false;
+    return;
+  }
+
+  localOk       = true;
+  localHaveEver = true;
+  localT        = temperature;
+  localH        = humidity;
+}
+
+// ===========================================================================
+// Telemetry
+// ===========================================================================
+
+// Append to buf while tracking the running length, refusing to produce a
+// truncated payload. A half-written JSON object published to ThingsBoard is
+// worse than no publish at all, because it looks like it worked.
+static bool appendf(char *buf, size_t bufLen, int &n, const char *fmt, ...) {
+  if (n < 0 || (size_t)n >= bufLen) {
+    return false;
+  }
+  va_list ap;
+  va_start(ap, fmt);
+  int written = vsnprintf(buf + n, bufLen - n, fmt, ap);
+  va_end(ap);
+
+  if (written < 0 || (size_t)written >= bufLen - (size_t)n) {
+    return false;  // would have been truncated
+  }
+  n += written;
+  return true;
+}
+
+static int buildPayload(char *buf, size_t bufLen) {
+  uint32_t ageMs  = node1HaveEver ? (millis() - node1LastRxMs) : 0;
+  bool     online = node1HaveEver && (ageMs < NODE_STALE_TIMEOUT_MS);
+
+  int  n  = 0;
+  bool ok = true;
+
+  ok = ok && appendf(buf, bufLen, n, "{");
+
+  // Never let a NaN reach the payload. snprintf renders NaN as "nan", which is
+  // not valid JSON, and ThingsBoard discards the entire message rather than the
+  // one bad field. A value key is omitted until there is a real number for it;
+  // the matching _ok / _online flag always ships so the dashboard can explain
+  // the gap.
+  if (localHaveEver) {
+    ok = ok && appendf(buf, bufLen, n,
+                       "\"gateway_temperature\":%.1f,\"gateway_humidity\":%.1f,",
+                       localT, localH);
+  }
+  ok = ok && appendf(buf, bufLen, n, "\"gateway_sensor_ok\":%s,",
+                     localOk ? "true" : "false");
+
+  if (node1HaveEver) {
+    ok = ok && appendf(buf, bufLen, n,
+                       "\"node1_temperature\":%.1f,\"node1_humidity\":%.1f,"
+                       "\"node1_sequence\":%lu,\"node1_age_ms\":%lu,",
+                       node1T, node1H,
+                       (unsigned long)node1Seq, (unsigned long)ageMs);
+  }
+  ok = ok && appendf(buf, bufLen, n, "\"node1_online\":%s,",
+                     online ? "true" : "false");
+
+  ok = ok && appendf(buf, bufLen, n,
+                     "\"duplicate_count\":%lu,\"espnow_received_count\":%lu}",
+                     (unsigned long)duplicateCount,
+                     (unsigned long)espnowReceivedCount);
+
+  return ok ? n : -1;
+}
+
+static void publishTelemetry() {
+  if (millis() - lastPublishMs < PUBLISH_INTERVAL_MS) {
+    return;
+  }
+  lastPublishMs = millis();
+
+  char payload[512];
+  int  len = buildPayload(payload, sizeof(payload));
+  if (len < 0) {
+    Serial.println("[GATEWAY] payload build failed (would have been truncated), skipping publish");
+    return;
+  }
+
+  uint32_t ageMs  = node1HaveEver ? (millis() - node1LastRxMs) : 0;
+  bool     online = node1HaveEver && (ageMs < NODE_STALE_TIMEOUT_MS);
+
+  Serial.printf("[GATEWAY] local_ok=%s  node1_online=%s  node1_age=%lu ms  "
+                "received=%lu  duplicates=%lu  invalid=%lu\n",
+                localOk ? "yes" : "no",
+                online ? "yes" : "no",
+                (unsigned long)ageMs,
+                (unsigned long)espnowReceivedCount,
+                (unsigned long)duplicateCount,
+                (unsigned long)rxInvalidCount);
+
+  if (!mqtt.connected()) {
+    Serial.printf("[GATEWAY] MQTT offline, payload not sent: %s\n", payload);
+    return;
+  }
+
+  if (mqtt.publish(MQTT_TOPIC, payload)) {
+    Serial.printf("[GATEWAY] MQTT published %d bytes: %s\n", len, payload);
+  } else {
+    Serial.printf("[GATEWAY] MQTT publish FAILED (state=%d): %s\n", mqtt.state(), payload);
+  }
+}
+
+// ===========================================================================
+// Arduino entry points
+// ===========================================================================
+
+void setup() {
+  Serial.begin(115200);
+  delay(300);  // let the USB serial port settle so the banner is not lost
+  Serial.println();
+  Serial.println("[GATEWAY] ============================================");
+  Serial.println("[GATEWAY] 05_board2_gateway_cloud");
+  Serial.println("[GATEWAY] ============================================");
+  Serial.printf("[GATEWAY] packet size = %u bytes (ESP-NOW limit is 250)\n",
+                (unsigned)sizeof(mesh_packet_t));
+
+#if !DEDUP_IMPLEMENTED
+  Serial.println("[GATEWAY] --------------------------------------------------------");
+  Serial.println("[GATEWAY] WARNING isDuplicate() is still the stub. Every packet is");
+  Serial.println("[GATEWAY] accepted, so duplicate_count will stay at 0 and the");
+  Serial.println("[GATEWAY] duplicate-rejection acceptance check cannot pass. Write");
+  Serial.println("[GATEWAY] the function, then set DEDUP_IMPLEMENTED to 1.");
+  Serial.println("[GATEWAY] --------------------------------------------------------");
+#endif
+
+  dht.begin();
+
+  // Wi-Fi first: the access point decides the channel that ESP-NOW must use.
+  setupWifi();
+  setupEspNow();
+  setupMqtt();
+
+  Serial.printf("[GATEWAY] publishing every %lu ms, node goes stale after %lu ms\n",
+                (unsigned long)PUBLISH_INTERVAL_MS,
+                (unsigned long)NODE_STALE_TIMEOUT_MS);
+}
+
+void loop() {
+  ensureWifi();
+  ensureMqtt();
+  mqtt.loop();
+
+  processReceivedPackets();
+  readLocalSensor();
+  publishTelemetry();
+
+  if (rxQueueFullCount > 0) {
+    Serial.printf("[GATEWAY] WARNING receive queue overflowed %lu time(s)\n",
+                  (unsigned long)rxQueueFullCount);
+    rxQueueFullCount = 0;
+  }
+}

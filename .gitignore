@@ -1,0 +1,8 @@
+# Real credentials. secrets.example.h is the committed template.
+secrets.h
+
+# Arduino build output, if a build path is ever pointed inside the project.
+build/
+*.bin
+*.elf
+*.map

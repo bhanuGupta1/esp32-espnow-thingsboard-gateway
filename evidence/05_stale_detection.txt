@@ -1,0 +1,16 @@
+﻿[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=3 boot_id=656081110 temperature=28.9 C humidity=33.0 % node_uptime=15024 ms ttl=3 hops=0
+[GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=4 boot_id=656081110 temperature=28.9 C humidity=33.0 % node_uptime=20024 ms ttl=3 hops=0
+[GATEWAY] local_ok=yes  node1_online=yes  node1_age=1034 ms  received=104  duplicates=0  invalid=0
+[GATEWAY] MQTT published 231 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.9,"node1_humidity":33.0,"node1_sequence":4,"node1_age_ms":1034,"node1_online":true,"duplicate_count":0,"espnow_received_count":104}
+[GATEWAY] local_ok=yes  node1_online=yes  node1_age=11034 ms  received=104  duplicates=0  invalid=0
+[GATEWAY] MQTT published 232 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.9,"node1_humidity":33.0,"node1_sequence":4,"node1_age_ms":11034,"node1_online":true,"duplicate_count":0,"espnow_received_count":104}
+[GATEWAY] local_ok=yes  node1_online=no  node1_age=21034 ms  received=104  duplicates=0  invalid=0
+[GATEWAY] MQTT published 233 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.9,"node1_humidity":33.0,"node1_sequence":4,"node1_age_ms":21034,"node1_online":false,"duplicate_count":0,"espnow_received_count":104}
+[GATEWAY] local_ok=yes  node1_online=no  node1_age=31034 ms  received=104  duplicates=0  invalid=0
+[GATEWAY] MQTT published 233 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.9,"node1_humidity":33.0,"node1_sequence":4,"node1_age_ms":31034,"node1_online":false,"duplicate_count":0,"espnow_received_count":104}
+[GATEWAY] local_ok=yes  node1_online=no  node1_age=41034 ms  received=104  duplicates=0  invalid=0
+[GATEWAY] MQTT published 233 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.9,"node1_humidity":33.0,"node1_sequence":4,"node1_age_ms":41034,"node1_online":false,"duplicate_count":0,"espnow_received_count":104}
+[GATEWAY] local_ok=yes  node1_online=no  node1_age=51034 ms  received=104  duplicates=0  invalid=0
+[GATEWAY] MQTT published 233 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.9,"node1_humidity":33.0,"node1_sequence":4,"node1_age_ms":51034,"node1_online":false,"duplicate_count":0,"espnow_received_count":104}
+[GATEWAY] local_ok=yes  node1_online=no  node1_age=61034 ms  received=104  duplicates=0  invalid=0
+[GATEWAY] MQTT published 233 bytes: {"gateway_temperature":21.4,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":28.9,"node1_humidity":33.0,"node1_sequence":4,"node1_age_ms":61034,"node1_online":false,"duplicate_count":0,"espnow_received_count":104}
