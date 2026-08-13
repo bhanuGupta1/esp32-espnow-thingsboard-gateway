@@ -279,19 +279,34 @@ change if the network grew a second hop. They are never decremented, because in 
 root/node topology there is nothing to forward to. Including them is a design decision about
 future-proofing, not a claim of implemented functionality.
 
-**No checksum field.** 802.11 already CRC-checks every frame it delivers, so a corrupted
-frame is dropped by the radio before the application sees it. The gateway's length, version
-and range checks catch anything structurally wrong that survives. Adding an application-layer
-checksum would duplicate work already done in hardware.
+**No checksum field.** 802.11 already CRC-checks every frame it delivers, so a frame
+corrupted in transit is dropped by the radio before the application sees it. An
+application-layer checksum would duplicate error detection already performed in hardware.
+
+It is worth being precise about what this does *not* cover. A checksum detects accidental
+corruption; it provides no authentication. A packet that is deliberately constructed with a
+valid checksum, a plausible temperature and a well-formed header would pass every check the
+gateway makes. Integrity against noise and authenticity against a hostile sender are separate
+problems, and only the first is addressed here. Section 7.8 covers what the gateway does about
+the second.
 
 ### 5.3 The `static_assert`
 
-The struct is duplicated verbatim in both sketches. Arduino sketch folders are separate
-compilation units with no shared-header mechanism, so there is no way to include it from one
-place. The assertion exists because a silent layout difference between the two copies would
-present at runtime as *"the gateway rejects every single packet on length"* — a failure that
-looks like a radio problem and is unpleasant to diagnose. The assertion converts it into a
-compile error instead. Both sketches compiling is proof that the two definitions agree.
+The struct is duplicated in both sketches, and the assertion in each pins `sizeof` to 26
+bytes. A silent size difference between the two copies would otherwise present at runtime as
+*"the gateway rejects every single packet on length"* — a failure that looks like a radio
+problem and is unpleasant to diagnose. The assertion converts it into a compile error.
+
+The assertion is a useful guard but not a proof of agreement, and the distinction matters.
+It constrains the total size only: two fields of the same width could be reordered, or a
+`uint32_t` swapped for a `float`, and both assertions would still pass while the two boards
+silently disagreed about what the bytes mean. That failure is worse than a length mismatch
+because nothing rejects it — the gateway would decode a plausible-looking wrong value.
+
+A stronger version would add `offsetof` assertions per field, or share one header through an
+Arduino library so that only a single definition exists. The latter is possible; the
+convenience of keeping each sketch self-contained for a classroom build was chosen over it,
+which is a trade rather than a necessity.
 
 ### 5.4 Gateway validation
 
@@ -431,8 +446,23 @@ gapped, without ever misrepresenting stale data as current.
 
 All timing in the final sketches uses `millis()` comparison rather than blocking `delay()`.
 Board 1 transmits every 5 s; Board 2 reads its local sensor every 2 s and publishes every
-10 s. Wi-Fi and MQTT reconnection are both non-blocking retry loops — a blocking wait would
-stall packet processing and local sensing for as long as the network stayed down.
+10 s. Reconnection is *rate-limited* rather than blocking-free: instead of spinning in a
+`while (!connected)` loop, each attempt is gated behind a 5 s timer so `loop()` keeps running
+between tries.
+
+One honest qualification. `mqtt.connect()` is itself a synchronous call — it performs a DNS
+lookup and a TCP handshake and does not return until one of those succeeds or times out. If
+the broker is unreachable, that single call can occupy the Arduino task for several seconds,
+during which packets are not drained from the queue and the local sensor is not read. Because
+the retry timestamp is taken *before* the attempt, an attempt lasting longer than the retry
+interval makes the next one immediately eligible, so a persistently unreachable broker can
+leave the device spending most of its time inside connection attempts.
+
+In practice the eight-entry receive queue absorbs the 5 s packet cadence comfortably and no
+overflow was observed in testing, but the queue-overflow counter exists precisely so that this
+would be visible rather than silent if it happened. A production design would use an
+asynchronous MQTT client or a bounded connection timeout, and would schedule the next attempt
+from the completion of the last one with exponential backoff.
 
 ### 7.6 Wi-Fi: WPA2-Enterprise
 
@@ -459,6 +489,124 @@ in production: a rogue access point advertising the same SSID could harvest the 
 Two observations. First, adding `WiFi.h` costs roughly 600 KB — the radio stack, lwIP and
 the network event loop dominate the binary far more than application logic does. Second,
 enabling WPA2-Enterprise costs a further ~97 KB for the PEAP/TLS supplicant.
+
+### 7.8 Security
+
+This section sets out what the system defends against, what it does not, and why. The
+distinction matters: a prototype that is honest about its exposure is more useful than one
+that claims a security posture it does not have.
+
+#### 7.8.1 Threat model
+
+Four attackers are worth considering for a system of this shape.
+
+| Attacker | Capability | Addressed? |
+|---|---|---|
+| Passive radio eavesdropper | Reads ESP-NOW frames within ~50 m using an SDR or a spare ESP32 | **No** |
+| Active radio injector | Transmits forged ESP-NOW frames at the gateway | **Partially** |
+| Network observer on the LAN | Reads unencrypted MQTT on port 1883 | **No** |
+| Attacker with physical access | Reads firmware over USB | **No** |
+
+The first and third are confidentiality problems; the second is an integrity and availability
+problem, and it is the one with the most interesting consequences.
+
+#### 7.8.2 What is defended
+
+**Input validation.** Every arriving frame is checked for exact length, protocol version,
+message type, destination ID, source ID, finiteness, and plausible sensor ranges (§5.4).
+Anything failing is discarded and counted rather than silently dropped, so a sustained attack
+would show up as a rising `invalid` counter in the gateway log rather than as inexplicable
+data.
+
+**Replay rejection.** The `(src_id, boot_id, seq)` deduplication described in §6 rejects any
+packet whose sequence number is not newer than the highest already accepted in the current
+session. A captured packet replayed later is discarded and counted. This was not designed as
+a security control — it exists to handle retransmissions — but it is one, and it is worth
+naming as such.
+
+**Sender address filtering.** The gateway compares the source MAC reported by the radio
+driver against Board 1's known address, and discards non-matching frames before examining
+their contents. This closes an attack that the design otherwise permits, described next.
+
+**Credential separation.** Wi-Fi and cloud credentials live in `secrets.h`, which is excluded
+from version control by `.gitignore`; `secrets.example.h` carries placeholders only. The
+repository is private, and the published archive was scanned for credential strings before
+distribution.
+
+#### 7.8.3 The sender-authentication problem
+
+This is worth setting out in full, because it is the most instructive weakness in the design.
+
+The gateway deliberately registers no ESP-NOW peers and uses no encryption, because that is
+what allows it to accept frames without a prior handshake. The consequence is that the
+`src_id` field inside the packet is *a claim by the sender, not evidence of identity*. Any
+ESP-NOW device in radio range could transmit a well-formed 26-byte packet asserting
+`src_id = 1`, and every validation check listed above would pass.
+
+The damaging case is not a wrong temperature on the dashboard. An injected packet carrying a
+very high sequence number under the currently live `boot_id` would advance the deduplication
+baseline, after which **every genuine packet from Board 1 is rejected as a duplicate** until
+that board reboots and picks a new `boot_id`. A single forged frame could silence the real
+node indefinitely. That is a denial-of-service achieved through the integrity mechanism
+itself, which is a pattern worth recognising: replay protection keyed on a monotonic counter
+becomes an attack surface when the counter can be advanced by an unauthenticated party.
+
+The mitigation implemented is a source MAC check in the receive callback. This raises the
+required effort — an attacker must now discover and spoof Board 1's MAC rather than simply
+transmit — but it does not solve the problem, because 802.11 source addresses are trivially
+forgeable by anyone able to inject frames in the first place. It is a speed bump, and the
+report describes it as one.
+
+The actual fix is ESP-NOW's built-in encryption: a Primary Master Key and per-peer Local
+Master Keys, with `esp_now_peer_info_t::encrypt` set true. That provides both confidentiality
+and sender authentication at the link layer, at the cost of requiring peers to be registered
+in advance and limiting the gateway to 20 encrypted peers. For a two-node system that cost is
+negligible, and a production build would take it.
+
+#### 7.8.4 What is not defended, and why
+
+**ESP-NOW payloads are unencrypted.** Anyone in radio range can read the temperature and
+humidity readings. For this data the confidentiality impact is near zero, but the honest
+framing is that the choice was made for debuggability during development rather than because
+the data was judged unimportant.
+
+**MQTT runs on port 1883 without TLS.** The ThingsBoard access token is transmitted as the
+MQTT username in clear text on every connection. Anyone able to observe traffic between the
+gateway and the broker — on the local network or any intermediate hop — can capture that token
+and then publish arbitrary telemetry to the device, or read it. This is the most serious
+practical weakness in the deployed system. ThingsBoard supports MQTT over TLS on port 8883,
+and the fix is to use it; it was not done here because the classroom configuration specified
+1883.
+
+**RADIUS server certificates are not validated.** The WPA2-Enterprise configuration passes
+`NULL` for the CA bundle (§7.6), so the gateway will authenticate to any access point
+advertising the target SSID. A rogue AP could therefore capture the institutional credentials
+via a PEAP downgrade. Validating the certificate requires shipping the institution's CA
+certificate in the firmware.
+
+**Credentials are compiled into flash as plain text.** They are recoverable from a board over
+USB with a single `esptool read-flash` command. On an institutional network those are
+personal account credentials, so a flashed board should be treated as a device that carries
+its owner's login. Provisioning into NVS at first boot, rather than compiling values in, would
+remove this exposure.
+
+#### 7.8.5 Summary
+
+| Control | Status |
+|---|---|
+| Packet structure and range validation | Implemented |
+| Replay rejection | Implemented |
+| Sender MAC filtering | Implemented (mitigation, not authentication) |
+| Credentials excluded from version control | Implemented |
+| ESP-NOW payload encryption | Not implemented |
+| ESP-NOW sender authentication (PMK/LMK) | Not implemented |
+| MQTT over TLS | Not implemented |
+| RADIUS certificate validation | Not implemented |
+| Secure credential storage | Not implemented |
+
+The system is appropriate for a classroom demonstration on a trusted bench. It is not
+suitable for deployment, and the four unimplemented controls above are the specific work that
+would be required to change that.
 
 ---
 
@@ -597,18 +745,16 @@ few hundred milliwatts within centimetres of its own sensor. The gap narrowed on
 boards reached thermal equilibrium, indicating the effect is a combination of genuine
 self-heating, thermal lag, and DHT11 part-to-part tolerance (±2 °C rated).
 
-**No encryption.** ESP-NOW is configured unencrypted, and MQTT uses port 1883 rather than
-TLS on 8883. The ThingsBoard access token crosses the network in clear text. Acceptable for
-a classroom prototype; unacceptable for deployment.
+**Security.** Set out in full in §7.8. In short: ESP-NOW payloads are unencrypted and senders
+are not cryptographically authenticated, MQTT runs without TLS so the access token crosses the
+network in clear text, RADIUS certificates are not validated, and credentials are compiled
+into flash. The system is suitable for a supervised bench demonstration and not for
+deployment.
 
-**No RADIUS certificate validation.** The enterprise Wi-Fi configuration does not verify the
-authentication server's certificate, leaving it vulnerable to a rogue access point
-advertising the same SSID.
-
-**Credentials compiled into firmware.** Wi-Fi credentials and the cloud access token are
-compiled into the binary as plain text and are recoverable from the board over USB. A
-production design would store them in NVS, provisioned at first boot rather than at compile
-time.
+**Blocking MQTT connection attempts.** `mqtt.connect()` is synchronous (§7.5). An unreachable
+broker can occupy the main loop for seconds at a time, delaying queue draining and sensor
+reads. No overflow was observed in testing, but the queue-overflow counter exists so that it
+would be visible rather than silent.
 
 **Manual channel configuration.** If the gateway roams to an access point on a different
 channel, the ESP-NOW link silently stops working while Wi-Fi and MQTT remain healthy. The

@@ -33,6 +33,7 @@
 #include <esp_now.h>
 #include <PubSubClient.h>
 #include <stdarg.h>
+#include <atomic>
 #include "DHT.h"
 #include "secrets.h"
 
@@ -42,6 +43,12 @@
 
 static const uint8_t  DHT_PIN                = 5;      // GPIO5, silkscreen D5
 static const uint8_t  DHT_KIND               = DHT11;
+
+// Board 1's station MAC. Frames from any other sender are discarded before
+// their contents are examined, because the src_id field inside the packet is a
+// claim rather than proof of identity. Read this off Board 1's own boot banner
+// ("own station MAC") in sketch 04 if you swap boards.
+static const uint8_t NODE_MAC[6] = { 0x44, 0x1D, 0x64, 0xF5, 0xFA, 0x24 };
 
 static const uint32_t LOCAL_READ_INTERVAL_MS = 2000;   // DHT11 needs >= 1000 ms
 static const uint32_t PUBLISH_INTERVAL_MS    = 10000;  // MQTT telemetry cadence
@@ -124,10 +131,19 @@ static uint8_t  espnowChannel  = 0;
 // burst without dropping anything.
 static QueueHandle_t rxQueue = nullptr;
 
-// Written by the callback, read by loop(). Single writer, so a plain volatile
-// counter is sufficient here.
-static volatile uint32_t rxInvalidCount   = 0;
-static volatile uint32_t rxQueueFullCount = 0;
+// Written by the ESP-NOW callback on the Wi-Fi task, read by loop() on the
+// Arduino task.
+//
+// `volatile` alone is not enough here. It stops the compiler caching the value
+// in a register, but it does not make read-modify-write atomic across two
+// tasks. rxQueueFullCount is the case that actually bites: the callback does
+// `count++` while loop() does read-print-reset, so an increment landing between
+// the read and the reset is silently discarded and the reported queue-overflow
+// figure comes out lower than reality. std::atomic makes the increment and the
+// read-and-clear indivisible.
+static std::atomic<uint32_t> rxInvalidCount{0};
+static std::atomic<uint32_t> rxQueueFullCount{0};
+static std::atomic<uint32_t> rxUnknownSenderCount{0};
 
 // Telemetry counters.
 static uint32_t espnowReceivedCount = 0;  // packets that passed validation
@@ -140,6 +156,11 @@ static float    node1T         = 0.0f;
 static float    node1H         = 0.0f;
 static uint32_t node1Seq       = 0;
 static uint32_t node1LastRxMs  = 0;
+
+// Set once the stale timeout is crossed, cleared only by a genuine packet.
+// See node1Liveness() for why the latch is needed rather than recomputing the
+// age each time.
+static bool     node1StaleLatched = false;
 
 // Last known good local reading, plus whether the most recent attempt worked.
 static bool  localHaveEver = false;
@@ -199,7 +220,13 @@ static bool isDuplicate(const mesh_packet_t &pkt) {
     return false;
   }
 
-  if (pkt.seq <= node1State.last_seq) {
+  // Wrap-aware comparison rather than a plain `pkt.seq <= last_seq`. Casting
+  // the difference to a signed type means "newer" stays correct when the
+  // counter rolls over past UINT32_MAX: a straight comparison would reject
+  // sequence 0 and everything after it for the rest of that session. At one
+  // packet every five seconds the rollover is roughly 681 years away, so this
+  // is correctness for its own sake rather than a practical concern.
+  if ((int32_t)(pkt.seq - node1State.last_seq) <= 0) {
     return true;  // already seen this sequence number in this session
   }
 
@@ -258,16 +285,33 @@ static bool validatePacket(const uint8_t *data, int len, mesh_packet_t &out) {
 static void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   rx_item_t item;
 
+  // Check who sent it before looking at what they sent.
+  //
+  // src_id inside the packet is a claim by the sender, not proof of identity.
+  // This gateway accepts frames from unregistered, unencrypted peers, so
+  // without this check any ESP-NOW device in radio range could submit a
+  // well-formed 26-byte packet and it would be accepted. The damaging case is
+  // not a wrong temperature on the dashboard: an injected packet carrying a
+  // very high sequence number under the live boot_id would advance the
+  // deduplication baseline, after which every genuine packet from Board 1 is
+  // rejected as a duplicate until it reboots.
+  //
+  // The source MAC comes from the radio driver rather than the payload. It is
+  // still spoofable by a determined attacker, so this raises the effort
+  // required rather than making the link secure - see the security section of
+  // the report. Real authentication needs ESP-NOW encryption with a PMK/LMK.
+  if (info == nullptr || info->src_addr == nullptr ||
+      memcmp(info->src_addr, NODE_MAC, 6) != 0) {
+    rxUnknownSenderCount++;
+    return;
+  }
+
   if (!validatePacket(data, len, item.pkt)) {
     rxInvalidCount++;
     return;
   }
 
-  if (info != nullptr && info->src_addr != nullptr) {
-    memcpy(item.src_mac, info->src_addr, 6);
-  } else {
-    memset(item.src_mac, 0, 6);
-  }
+  memcpy(item.src_mac, info->src_addr, 6);
 
   if (xQueueSend(rxQueue, &item, 0) != pdTRUE) {
     rxQueueFullCount++;
@@ -295,11 +339,12 @@ static void processReceivedPackets() {
       continue;
     }
 
-    node1HaveEver = true;
-    node1T        = item.pkt.temperature_c;
-    node1H        = item.pkt.humidity_pct;
-    node1Seq      = item.pkt.seq;
-    node1LastRxMs = millis();
+    node1HaveEver     = true;
+    node1T            = item.pkt.temperature_c;
+    node1H            = item.pkt.humidity_pct;
+    node1Seq          = item.pkt.seq;
+    node1LastRxMs     = millis();
+    node1StaleLatched = false;  // a real packet is the only thing that clears it
 
     Serial.printf("[GATEWAY] ESP-NOW rx from %s  node=%u seq=%lu boot_id=%lu "
                   "temperature=%.1f C humidity=%.1f %% node_uptime=%lu ms ttl=%u hops=%u\n",
@@ -541,7 +586,14 @@ static void readLocalSensor() {
   float humidity    = dht.readHumidity();
   float temperature = dht.readTemperature();
 
-  if (isnan(humidity) || isnan(temperature)) {
+  // isfinite rather than isnan, and the same range check applied to remote
+  // readings. An infinity would slip past an isnan test and then render as
+  // "inf" in the payload, which is not valid JSON and would cost the whole
+  // message. Holding local data to the same standard as data arriving over the
+  // radio also removes a silent asymmetry in what the two paths trust.
+  if (!isfinite(humidity) || !isfinite(temperature) ||
+      temperature < TEMP_MIN_C  || temperature > TEMP_MAX_C ||
+      humidity    < HUM_MIN_PCT || humidity    > HUM_MAX_PCT) {
     // Keep the previous good values but flag the sensor as unhealthy. The
     // gateway_sensor_ok key is what tells the dashboard the truth.
     localOk = false;
@@ -577,9 +629,35 @@ static bool appendf(char *buf, size_t bufLen, int &n, const char *fmt, ...) {
   return true;
 }
 
+// Age since the last valid packet, and whether the node counts as online.
+//
+// The latch matters. millis() wraps every ~49.7 days, so a node that has been
+// absent for that long would see its computed age wrap back through zero and
+// briefly report itself online again despite nothing having arrived. Once the
+// stale threshold is crossed the state is latched and only a genuine reception
+// clears it, which makes the flag monotonic in the way a reader expects.
+static void node1Liveness(uint32_t &ageMs, bool &online) {
+  if (!node1HaveEver) {
+    ageMs  = 0;
+    online = false;
+    return;
+  }
+  ageMs = millis() - node1LastRxMs;
+  if (ageMs >= NODE_STALE_TIMEOUT_MS) {
+    node1StaleLatched = true;
+  }
+  online = !node1StaleLatched;
+  if (node1StaleLatched && ageMs < NODE_STALE_TIMEOUT_MS) {
+    // Age wrapped while still stale. Report the threshold rather than a
+    // misleadingly small number.
+    ageMs = NODE_STALE_TIMEOUT_MS;
+  }
+}
+
 static int buildPayload(char *buf, size_t bufLen) {
-  uint32_t ageMs  = node1HaveEver ? (millis() - node1LastRxMs) : 0;
-  bool     online = node1HaveEver && (ageMs < NODE_STALE_TIMEOUT_MS);
+  uint32_t ageMs = 0;
+  bool     online = false;
+  node1Liveness(ageMs, online);
 
   int  n  = 0;
   bool ok = true;
@@ -630,17 +708,19 @@ static void publishTelemetry() {
     return;
   }
 
-  uint32_t ageMs  = node1HaveEver ? (millis() - node1LastRxMs) : 0;
-  bool     online = node1HaveEver && (ageMs < NODE_STALE_TIMEOUT_MS);
+  uint32_t ageMs = 0;
+  bool     online = false;
+  node1Liveness(ageMs, online);
 
   Serial.printf("[GATEWAY] local_ok=%s  node1_online=%s  node1_age=%lu ms  "
-                "received=%lu  duplicates=%lu  invalid=%lu\n",
+                "received=%lu  duplicates=%lu  invalid=%lu  wrong_sender=%lu\n",
                 localOk ? "yes" : "no",
                 online ? "yes" : "no",
                 (unsigned long)ageMs,
                 (unsigned long)espnowReceivedCount,
                 (unsigned long)duplicateCount,
-                (unsigned long)rxInvalidCount);
+                (unsigned long)rxInvalidCount.load(),
+                (unsigned long)rxUnknownSenderCount.load());
 
   if (!mqtt.connected()) {
     Serial.printf("[GATEWAY] MQTT offline, payload not sent: %s\n", payload);
@@ -698,9 +778,13 @@ void loop() {
   readLocalSensor();
   publishTelemetry();
 
-  if (rxQueueFullCount > 0) {
+  // exchange() reads and clears in one indivisible step. Reading, printing and
+  // then assigning zero would let an increment from the Wi-Fi task land in the
+  // gap and be silently discarded, under-reporting the very overflow this
+  // warning exists to surface.
+  uint32_t overflowed = rxQueueFullCount.exchange(0);
+  if (overflowed > 0) {
     Serial.printf("[GATEWAY] WARNING receive queue overflowed %lu time(s)\n",
-                  (unsigned long)rxQueueFullCount);
-    rxQueueFullCount = 0;
+                  (unsigned long)overflowed);
   }
 }

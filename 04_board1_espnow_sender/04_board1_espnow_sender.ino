@@ -25,6 +25,7 @@
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <esp_now.h>
+#include <atomic>
 #include "DHT.h"
 
 // ===========================================================================
@@ -108,6 +109,13 @@ static uint32_t sendOk     = 0;
 static uint32_t sendFail   = 0;
 static uint32_t sensorFail = 0;
 
+// Written by the send callback on the Wi-Fi task, drained by loop() on the
+// Arduino task. Atomic because both ends read-modify-write them; a plain
+// counter could lose an increment that lands between loop()'s read and reset.
+static std::atomic<uint32_t> pendingOk{0};
+static std::atomic<uint32_t> pendingFail{0};
+static uint8_t lastSendMac[6] = {0};
+
 static void macToString(const uint8_t *mac, char *out, size_t outLen) {
   snprintf(out, outLen, "%02X:%02X:%02X:%02X:%02X:%02X",
            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -122,15 +130,38 @@ static void macToString(const uint8_t *mac, char *out, size_t outLen) {
 // with the tx_info form below. Older tutorials use the old form and will not
 // compile against this core. The destination MAC now lives in tx_info->des_addr.
 // ---------------------------------------------------------------------------
+// This callback runs on the Wi-Fi task, so it records the outcome and returns
+// rather than printing. Serial output blocks once the UART buffer fills, and
+// blocking here delays the radio driver, which can cost later packets or trip
+// the task watchdog. reportSendResults() does the printing from loop().
 static void onEspNowSent(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
-  char macStr[18];
-  macToString(tx_info->des_addr, macStr, sizeof(macStr));
-
+  if (tx_info != nullptr) {
+    memcpy(lastSendMac, tx_info->des_addr, 6);
+  }
   if (status == ESP_NOW_SEND_SUCCESS) {
     sendOk++;
-    Serial.printf("[NODE] send to %s : OK (link-layer ack received)\n", macStr);
+    pendingOk++;
   } else {
     sendFail++;
+    pendingFail++;
+  }
+}
+
+// Called from loop(), where blocking on the UART is harmless.
+static void reportSendResults() {
+  uint32_t ok   = pendingOk.exchange(0);
+  uint32_t fail = pendingFail.exchange(0);
+  if (ok == 0 && fail == 0) {
+    return;
+  }
+
+  char macStr[18];
+  macToString(lastSendMac, macStr, sizeof(macStr));
+
+  if (ok > 0) {
+    Serial.printf("[NODE] send to %s : OK (link-layer ack received)\n", macStr);
+  }
+  if (fail > 0) {
     Serial.printf("[NODE] send to %s : FAILED (no ack) ok=%lu fail=%lu\n",
                   macStr, (unsigned long)sendOk, (unsigned long)sendFail);
     Serial.println("[NODE]   likely causes: wrong gateway MAC, wrong channel, gateway powered off");
@@ -253,6 +284,11 @@ void setup() {
 }
 
 void loop() {
+  // Print any send results the callback recorded since the last pass. Done
+  // here rather than in the callback so the Wi-Fi task is never blocked on the
+  // UART.
+  reportSendResults();
+
   if (millis() - lastSendMs < SEND_INTERVAL_MS) {
     return;
   }
@@ -261,7 +297,9 @@ void loop() {
   float humidity    = dht.readHumidity();
   float temperature = dht.readTemperature();  // degrees Celsius
 
-  if (isnan(humidity) || isnan(temperature)) {
+  // isfinite rather than isnan: an infinity would pass an isnan test and then
+  // be rejected by the gateway's range check, wasting a sequence number.
+  if (!isfinite(humidity) || !isfinite(temperature)) {
     // Skip the transmission entirely and do not consume a sequence number.
     // Sending NaN would only give the gateway something to reject, and burning
     // a sequence number would make the gap look like a lost packet.
