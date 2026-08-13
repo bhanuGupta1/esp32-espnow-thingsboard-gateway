@@ -177,16 +177,16 @@ credentials for either network.
 
 The system implements four controls and leaves four significant exposures.
 
-**Implemented.** Structural and plausibility validation rejects malformed frames. Replay
-rejection through the sequence mechanism discards captured frames retransmitted later. Source
-MAC filtering discards frames from any address other than the expected node. Credentials are
-excluded from version control and the published repository was scanned before distribution.
+**Implemented.** ESP-NOW link encryption using a primary master key and a per-peer local master
+key provides both confidentiality and sender authentication on the radio leg. Structural and
+plausibility validation rejects malformed frames. Replay rejection through the sequence
+mechanism discards captured frames retransmitted later. Source MAC filtering is retained as
+defence in depth. Credentials are excluded from version control.
 
-**Not implemented.** ESP-NOW payloads are unencrypted, so anyone with a receiver in range can
-read the telemetry. Senders are not cryptographically authenticated. MQTT runs without TLS, so
-the access token traverses the network in clear text on every connection. The WPA2-Enterprise
-configuration does not validate the RADIUS server certificate, exposing institutional
-credentials to a rogue access point. Credentials are compiled into the firmware image and are
+**Not implemented.** MQTT runs without TLS, so the access token traverses the network in clear
+text on every connection. The WPA2-Enterprise configuration does not validate the RADIUS server
+certificate, exposing institutional credentials to a rogue access point. All credentials —
+Wi-Fi, cloud token and the ESP-NOW keys — are compiled into the firmware image and are
 recoverable over USB.
 
 The most instructive weakness concerns **the difference between an identifier and an
@@ -202,12 +202,20 @@ indefinitely.
 This is worth generalising. Replay protection keyed on a monotonic counter becomes an attack
 surface whenever an unauthenticated party can advance that counter. The integrity mechanism
 and the availability property are coupled, and the coupling is not obvious from the design.
-The mitigation implemented — MAC filtering — raises the effort required but does not solve the
-problem, since 802.11 source addresses are forgeable by anyone capable of injecting frames.
-The correct remedy is ESP-NOW's built-in encryption using a primary master key and per-peer
-local master keys, which provides link-layer confidentiality and sender authentication
-together. This aligns with the guidance in the OWASP IoT Top 10 concerning insecure network
-services and lack of transport encryption (OWASP Foundation, 2018).
+
+The remediation history is instructive. The first mitigation attempted was source MAC
+filtering — discard frames whose driver-reported address is not the expected node. Independent
+adversarial review rejected this as a trust boundary, correctly: 802.11 source addresses are
+forgeable by anyone already able to inject frames, so the filter constrains only the
+unmotivated attacker. Filtering on a value the attacker controls is not authentication.
+
+The implemented remedy is ESP-NOW's link encryption, using a primary master key and per-peer
+local master keys. A frame is now accepted because it decrypts correctly under a key the
+sender must hold, not because of an address the sender selected. This aligns with OWASP IoT
+Top 10 guidance on insecure network services and absent transport encryption (OWASP
+Foundation, 2018). The general lesson — that a security property is not observable by testing
+the happy path, since the system behaves correctly under every non-hostile input — is the most
+transferable finding of the project.
 
 ### 2.5 Scalability design
 

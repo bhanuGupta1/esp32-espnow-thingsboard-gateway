@@ -377,27 +377,66 @@ static void setupEspNow() {
     }
   }
 
-  // Halt rather than continue if the callback will not register. Without it
-  // nothing can ever be received, and carrying on would print "ESP-NOW
-  // listening" while the gateway was permanently deaf - a far more confusing
-  // failure than stopping with a stated reason.
-  err = esp_now_register_recv_cb(onEspNowRecv);
-  if (err != ESP_OK) {
-    Serial.printf("[GATEWAY] esp_now_register_recv_cb failed: %s\n", esp_err_to_name(err));
-    Serial.println("[GATEWAY] nothing can be received - halting rather than pretending to listen");
-    while (true) {
-      delay(1000);
+  // Retry with backoff, then restart. Continuing without a registered callback
+  // would print "ESP-NOW listening" while the gateway was permanently deaf,
+  // which is the most confusing possible failure. But halting forever is just
+  // as bad: registration can fail for recoverable reasons such as transient
+  // memory pressure, and a board that needs a physical reset to recover is
+  // inconsistent with Wi-Fi and MQTT both self-healing in loop(). A reboot
+  // recovers autonomously and is cheap on a device with nothing to lose.
+  const int MAX_ATTEMPTS = 5;
+  for (int attempt = 1; ; attempt++) {
+    err = esp_now_register_recv_cb(onEspNowRecv);
+    if (err == ESP_OK) {
+      break;
     }
+    Serial.printf("[GATEWAY] esp_now_register_recv_cb failed (attempt %d/%d): %s\n",
+                  attempt, MAX_ATTEMPTS, esp_err_to_name(err));
+    if (attempt >= MAX_ATTEMPTS) {
+      Serial.println("[GATEWAY] cannot receive without a callback - restarting");
+      delay(200);  // let the message reach the UART before the reset
+      ESP.restart();
+    }
+    delay(200 * attempt);  // linear backoff
   }
 
-  // No peer registration here on purpose. The gateway only ever receives, and
-  // unencrypted ESP-NOW accepts frames from senders that are not registered as
-  // peers. Board 1 is the side that needs a peer entry, because it transmits.
+  // The gateway registers the node as an encrypted peer even though it only
+  // ever receives. Encryption is symmetric: without a peer entry carrying the
+  // LMK, the driver cannot decrypt incoming frames and they are discarded
+  // before reaching the callback.
+  //
+  // This replaces an earlier design that registered no peers and accepted any
+  // sender, filtering afterwards on source MAC. That filter was not a trust
+  // boundary - MAC addresses are forgeable by anyone able to transmit, so an
+  // attacker could still inject a frame carrying a high sequence number and
+  // poison the deduplication baseline. Requiring a valid ciphertext closes it:
+  // a frame that decrypts correctly must have come from something holding the
+  // key. The MAC comparison in the callback is retained as defence in depth.
+  static const uint8_t pmk[16] = ESPNOW_PMK;
+  err = esp_now_set_pmk(pmk);
+  if (err != ESP_OK) {
+    Serial.printf("[GATEWAY] esp_now_set_pmk failed: %s\n", esp_err_to_name(err));
+  }
+
+  static const uint8_t lmk[16] = ESPNOW_LMK;
+  esp_now_peer_info_t peer = {};
+  memcpy(peer.peer_addr, NODE_MAC, 6);
+  memcpy(peer.lmk, lmk, 16);
+  peer.channel = espnowChannel;
+  peer.ifidx   = WIFI_IF_STA;
+  peer.encrypt = true;
+
+  err = esp_now_add_peer(&peer);
+  if (err != ESP_OK) {
+    Serial.printf("[GATEWAY] esp_now_add_peer failed: %s\n", esp_err_to_name(err));
+    Serial.println("[GATEWAY] without an encrypted peer entry nothing can be decrypted");
+  }
+
   char nodeMacStr[18];
   macToString(NODE_MAC, nodeMacStr, sizeof(nodeMacStr));
   Serial.printf("[GATEWAY] ESP-NOW listening on channel %u, expecting %u byte packets\n",
                 espnowChannel, (unsigned)sizeof(mesh_packet_t));
-  Serial.printf("[GATEWAY] accepting frames only from node MAC %s\n", nodeMacStr);
+  Serial.printf("[GATEWAY] encrypted peer registered: %s (PMK/LMK set)\n", nodeMacStr);
 }
 
 // ===========================================================================

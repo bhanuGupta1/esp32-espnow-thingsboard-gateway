@@ -27,6 +27,7 @@
 #include <esp_now.h>
 #include <atomic>
 #include "DHT.h"
+#include "secrets.h"
 
 // ===========================================================================
 // CONFIG - the two values below MUST be replaced before this sketch will work
@@ -105,16 +106,20 @@ static_assert(sizeof(mesh_packet_t) == 26, "mesh_packet_t layout changed, update
 static uint32_t bootId     = 0;  // randomised once per boot
 static uint32_t sequence   = 0;
 static uint32_t lastSendMs = 0;
-static uint32_t sendOk     = 0;
-static uint32_t sendFail   = 0;
-static uint32_t sensorFail = 0;
+static uint32_t sensorFail = 0;  // Arduino task only
 
-// Written by the send callback on the Wi-Fi task, drained by loop() on the
-// Arduino task. Atomic because both ends read-modify-write them; a plain
-// counter could lose an increment that lands between loop()'s read and reset.
+// Shared between the send callback (Wi-Fi task) and loop() (Arduino task), so
+// all of them are atomic. The pending pair is drained with exchange() to report
+// results; the cumulative pair is only ever incremented and read.
+//
+// There is deliberately no "last destination MAC" variable. Every send in this
+// sketch goes to GATEWAY_MAC, which is a compile-time constant, so loop() can
+// format that directly. Copying the address out of the callback would have
+// introduced a genuine data race for no information gain.
 static std::atomic<uint32_t> pendingOk{0};
 static std::atomic<uint32_t> pendingFail{0};
-static uint8_t lastSendMac[6] = {0};
+static std::atomic<uint32_t> sendOk{0};
+static std::atomic<uint32_t> sendFail{0};
 
 static void macToString(const uint8_t *mac, char *out, size_t outLen) {
   snprintf(out, outLen, "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -135,9 +140,7 @@ static void macToString(const uint8_t *mac, char *out, size_t outLen) {
 // blocking here delays the radio driver, which can cost later packets or trip
 // the task watchdog. reportSendResults() does the printing from loop().
 static void onEspNowSent(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
-  if (tx_info != nullptr) {
-    memcpy(lastSendMac, tx_info->des_addr, 6);
-  }
+  (void)tx_info;  // always GATEWAY_MAC; loop() formats the constant instead
   if (status == ESP_NOW_SEND_SUCCESS) {
     sendOk++;
     pendingOk++;
@@ -155,15 +158,22 @@ static void reportSendResults() {
     return;
   }
 
+  // GATEWAY_MAC rather than an address captured in the callback: it is the only
+  // destination this sketch uses, and reading a constant cannot race.
   char macStr[18];
-  macToString(lastSendMac, macStr, sizeof(macStr));
+  macToString(GATEWAY_MAC, macStr, sizeof(macStr));
 
+  // Report the drained counts, not just "one happened". If several callbacks
+  // land between passes through loop(), collapsing them to a single line would
+  // under-report what the radio actually did.
   if (ok > 0) {
-    Serial.printf("[NODE] send to %s : OK (link-layer ack received)\n", macStr);
+    Serial.printf("[NODE] send to %s : OK x%lu (link-layer ack received)  total_ok=%lu\n",
+                  macStr, (unsigned long)ok, (unsigned long)sendOk.load());
   }
   if (fail > 0) {
-    Serial.printf("[NODE] send to %s : FAILED (no ack) ok=%lu fail=%lu\n",
-                  macStr, (unsigned long)sendOk, (unsigned long)sendFail);
+    Serial.printf("[NODE] send to %s : FAILED x%lu (no ack)  total_ok=%lu total_fail=%lu\n",
+                  macStr, (unsigned long)fail,
+                  (unsigned long)sendOk.load(), (unsigned long)sendFail.load());
     Serial.println("[NODE]   likely causes: wrong gateway MAC, wrong channel, gateway powered off");
   }
 }
@@ -230,22 +240,53 @@ static void setupEspNow() {
 
   esp_now_register_send_cb(onEspNowSent);
 
+  // Install the primary master key before adding any encrypted peer. The PMK
+  // protects the per-peer LMK during setup; the LMK then encrypts the payload.
+  // Both keys must be byte-identical on the two boards or frames are silently
+  // discarded at the far end with no error on this side.
+  static const uint8_t pmk[16] = ESPNOW_PMK;
+  err = esp_now_set_pmk(pmk);
+  if (err != ESP_OK) {
+    Serial.printf("[NODE] esp_now_set_pmk failed: %s\n", esp_err_to_name(err));
+  }
+
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, GATEWAY_MAC, 6);
   peer.channel = ESPNOW_CHANNEL;
   peer.ifidx   = WIFI_IF_STA;
-  peer.encrypt = false;  // unencrypted keeps the classroom setup debuggable
 
-  // Halt on failure rather than carrying on. Without a peer entry every send
-  // fails, and looping forever printing send errors hides the actual cause.
-  err = esp_now_add_peer(&peer);
-  if (err != ESP_OK) {
-    Serial.printf("[NODE] esp_now_add_peer failed: %s - halting\n", esp_err_to_name(err));
-    Serial.println("[NODE] no peer means every send would fail; fix GATEWAY_MAC or the channel");
-    while (true) {
-      delay(1000);
+  // Encrypted rather than plaintext. A MAC address is trivially spoofable, so
+  // filtering on it at the gateway raised the effort required without actually
+  // authenticating anyone. With an LMK, a frame the gateway accepts must have
+  // been produced by something holding the key, which is what authentication
+  // means. Costs: peers must be registered on both sides in advance, and the
+  // encrypted peer table is limited to 20 entries.
+  static const uint8_t lmk[16] = ESPNOW_LMK;
+  memcpy(peer.lmk, lmk, 16);
+  peer.encrypt = true;
+
+  // Retry with backoff, then restart. Without a peer entry every send fails, so
+  // carrying on would produce an endless stream of send errors that hides the
+  // real cause. Halting forever is equally unhelpful, since the failure may be
+  // transient - a restart recovers without anyone touching the board.
+  const int MAX_ATTEMPTS = 5;
+  for (int attempt = 1; ; attempt++) {
+    err = esp_now_add_peer(&peer);
+    if (err == ESP_OK) {
+      break;
     }
-  } else {
+    Serial.printf("[NODE] esp_now_add_peer failed (attempt %d/%d): %s\n",
+                  attempt, MAX_ATTEMPTS, esp_err_to_name(err));
+    if (attempt >= MAX_ATTEMPTS) {
+      Serial.println("[NODE] no peer means every send would fail - restarting");
+      Serial.println("[NODE] if this repeats, check GATEWAY_MAC and ESPNOW_CHANNEL");
+      delay(200);
+      ESP.restart();
+    }
+    delay(200 * attempt);
+  }
+
+  {
     char macStr[18];
     macToString(GATEWAY_MAC, macStr, sizeof(macStr));
     Serial.printf("[NODE] gateway peer added: %s on channel %u\n", macStr, ESPNOW_CHANNEL);

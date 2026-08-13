@@ -530,9 +530,16 @@ session. A captured packet replayed later is discarded and counted. This was not
 a security control — it exists to handle retransmissions — but it is one, and it is worth
 naming as such.
 
-**Sender address filtering.** The gateway compares the source MAC reported by the radio
-driver against Board 1's known address, and discards non-matching frames before examining
-their contents. This closes an attack that the design otherwise permits, described next.
+**Link-layer encryption and sender authentication.** ESP-NOW is configured with a 16-byte
+primary master key and a per-peer local master key, and both boards register each other as
+encrypted peers. A frame the gateway accepts must therefore decrypt correctly under a key held
+by only the two boards, which is what makes it evidence of origin rather than a claim of
+origin. §7.8.3 describes the attack this closes and why the weaker measure it replaced was
+insufficient.
+
+**Sender address filtering.** The gateway additionally compares the driver-reported source MAC
+against Board 1's known address. Retained as defence in depth rather than as the trust
+boundary, since a MAC address alone is forgeable.
 
 **Credential separation.** Wi-Fi and cloud credentials live in `secrets.h`, which is excluded
 from version control by `.gitignore`; `secrets.example.h` carries placeholders only. The
@@ -557,24 +564,31 @@ node indefinitely. That is a denial-of-service achieved through the integrity me
 itself, which is a pattern worth recognising: replay protection keyed on a monotonic counter
 becomes an attack surface when the counter can be advanced by an unauthenticated party.
 
-The mitigation implemented is a source MAC check in the receive callback. This raises the
-required effort — an attacker must now discover and spoof Board 1's MAC rather than simply
-transmit — but it does not solve the problem, because 802.11 source addresses are trivially
-forgeable by anyone able to inject frames in the first place. It is a speed bump, and the
-report describes it as one.
+**The first attempt at a fix, and why it was not enough.** The initial mitigation was a source
+MAC check in the receive callback: compare the address the radio driver reports against Board
+1's known MAC and discard anything else. This raised the effort required, but an adversarial
+review correctly rejected it as a trust boundary. 802.11 source addresses are trivially
+forgeable by anyone already capable of injecting frames, so an attacker could observe the live
+`boot_id`, transmit using Board 1's address, and execute the attack unchanged. Filtering on an
+identifier that the attacker controls is not authentication.
 
-The actual fix is ESP-NOW's built-in encryption: a Primary Master Key and per-peer Local
-Master Keys, with `esp_now_peer_info_t::encrypt` set true. That provides both confidentiality
-and sender authentication at the link layer, at the cost of requiring peers to be registered
-in advance and limiting the gateway to 20 encrypted peers. For a two-node system that cost is
-negligible, and a production build would take it.
+**The implemented fix.** ESP-NOW link encryption. A 16-byte primary master key is installed on
+both boards with `esp_now_set_pmk()`, and each registers the other as a peer carrying a
+16-byte local master key with `esp_now_peer_info_t::encrypt` set true. Encryption in ESP-NOW is
+symmetric in a way worth noting: the *receiver* also needs a peer entry, because without the
+LMK the driver cannot decrypt the frame and discards it before any application code runs.
+
+This changes the property being relied upon. Previously the gateway accepted a frame because
+of an address the sender chose; now it accepts a frame because the frame decrypted correctly
+under a key the sender must possess. Forging a packet requires the key rather than a
+transmitter, which is the difference between an identifier and an authenticator.
+
+The MAC comparison was kept as defence in depth. The costs are that peers must be registered
+in advance on both sides, that the encrypted peer table is limited to 20 entries, and that the
+keys are one more secret to manage — they live in each sketch's gitignored `secrets.h` and, as
+with every other credential here, are recoverable from flash over USB.
 
 #### 7.8.4 What is not defended, and why
-
-**ESP-NOW payloads are unencrypted.** Anyone in radio range can read the temperature and
-humidity readings. For this data the confidentiality impact is near zero, but the honest
-framing is that the choice was made for debuggability during development rather than because
-the data was judged unimportant.
 
 **MQTT runs on port 1883 without TLS.** The ThingsBoard access token is transmitted as the
 MQTT username in clear text on every connection. Anyone able to observe traffic between the
@@ -602,17 +616,26 @@ remove this exposure.
 |---|---|
 | Packet structure and range validation | Implemented |
 | Replay rejection | Implemented |
-| Sender MAC filtering | Implemented (mitigation, not authentication) |
+| ESP-NOW payload encryption | Implemented (PMK + per-peer LMK) |
+| ESP-NOW sender authentication | Implemented (encrypted peer registration) |
+| Sender MAC filtering | Implemented (defence in depth) |
 | Credentials excluded from version control | Implemented |
-| ESP-NOW payload encryption | Not implemented |
-| ESP-NOW sender authentication (PMK/LMK) | Not implemented |
 | MQTT over TLS | Not implemented |
 | RADIUS certificate validation | Not implemented |
 | Secure credential storage | Not implemented |
 
-The system is appropriate for a classroom demonstration on a trusted bench. It is not
-suitable for deployment, and the four unimplemented controls above are the specific work that
-would be required to change that.
+The radio link is now authenticated and encrypted; the remaining exposures are on the cloud
+leg and in credential storage. The system is appropriate for a classroom demonstration, and
+the three unimplemented controls above are the specific work required before deployment.
+
+It is worth recording how the encryption came to be implemented, because the process is part
+of the result. The first version of this system used no encryption at all. Adding source MAC
+filtering appeared to close the injection attack, and would have been reported as a mitigation
+had the design not been submitted for independent adversarial review. That review rejected the
+filter as a trust boundary on the grounds that the attacker controls the value being filtered
+on — which was correct, and which no functional test would have revealed, since the system
+behaves correctly under every non-hostile input. Security properties are not observable by
+testing the happy path.
 
 ---
 
@@ -758,11 +781,10 @@ few hundred milliwatts within centimetres of its own sensor. The gap narrowed on
 boards reached thermal equilibrium, indicating the effect is a combination of genuine
 self-heating, thermal lag, and DHT11 part-to-part tolerance (±2 °C rated).
 
-**Security.** Set out in full in §7.8. In short: ESP-NOW payloads are unencrypted and senders
-are not cryptographically authenticated, MQTT runs without TLS so the access token crosses the
-network in clear text, RADIUS certificates are not validated, and credentials are compiled
-into flash. The system is suitable for a supervised bench demonstration and not for
-deployment.
+**Security.** Set out in full in §7.8. The radio link is encrypted and sender-authenticated,
+but MQTT runs without TLS so the access token crosses the network in clear text, RADIUS
+certificates are not validated, and all credentials — including the ESP-NOW keys — are
+compiled into flash and recoverable over USB.
 
 **Blocking MQTT connection attempts.** `mqtt.connect()` is synchronous (§7.5). An unreachable
 broker can occupy the main loop for seconds at a time, delaying queue draining and sensor
