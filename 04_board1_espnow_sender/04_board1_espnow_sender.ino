@@ -36,11 +36,15 @@
 // Board 2's station MAC, as reported by sketch 03 and confirmed by esptool.
 static uint8_t GATEWAY_MAC[6] = { 0x44, 0x1D, 0x64, 0xF4, 0xF1, 0xC8 };
 
-// Confirmed: sketch 05 reported "ACTIVE 2.4 GHz CHANNEL = 1" after Board 2
-// associated with eduroam. This must match exactly, and it is not permanent --
-// eduroam has access points on channels 1, 6 and 11, so if Board 2 ever
-// associates with a different one this value has to be updated and re-uploaded.
-static const uint8_t ESPNOW_CHANNEL = 1;
+// Must equal the channel sketch 05 reports after Board 2 associates.
+//
+// This value is NOT permanent, and that is not theoretical. During testing the
+// gateway roamed from channel 1 to channel 11 mid-session; delivery stopped
+// dead until this constant was updated and re-uploaded, while Wi-Fi and MQTT
+// on the gateway carried on looking perfectly healthy. eduroam has access
+// points on channels 1, 6 and 11. Always read the channel off the gateway's
+// boot banner before a demonstration.
+static const uint8_t ESPNOW_CHANNEL = 11;
 
 // How often a reading is transmitted.
 static const uint32_t SEND_INTERVAL_MS = 5000;
@@ -49,6 +53,14 @@ static const uint32_t SEND_INTERVAL_MS = 5000;
 // sequence number, which lets the gateway prove that its duplicate detection
 // works. Leave at 0 for normal operation.
 #define SEND_DUPLICATE_FOR_DEMO 0
+
+// ESP-NOW link encryption. MUST match ESPNOW_ENCRYPT in sketch 05 - if the two
+// sides disagree, frames are discarded with no error on either board.
+//
+// Verified working on this hardware with the gateway associated to an access
+// point and this node unassociated. The keys live in secrets.h and must be
+// byte-identical on both boards.
+#define ESPNOW_ENCRYPT 1
 
 // ===========================================================================
 // Sensor
@@ -240,30 +252,28 @@ static void setupEspNow() {
 
   esp_now_register_send_cb(onEspNowSent);
 
-  // Install the primary master key before adding any encrypted peer. The PMK
-  // protects the per-peer LMK during setup; the LMK then encrypts the payload.
-  // Both keys must be byte-identical on the two boards or frames are silently
-  // discarded at the far end with no error on this side.
-  static const uint8_t pmk[16] = ESPNOW_PMK;
-  err = esp_now_set_pmk(pmk);
-  if (err != ESP_OK) {
-    Serial.printf("[NODE] esp_now_set_pmk failed: %s\n", esp_err_to_name(err));
-  }
-
   esp_now_peer_info_t peer = {};
   memcpy(peer.peer_addr, GATEWAY_MAC, 6);
   peer.channel = ESPNOW_CHANNEL;
   peer.ifidx   = WIFI_IF_STA;
 
-  // Encrypted rather than plaintext. A MAC address is trivially spoofable, so
-  // filtering on it at the gateway raised the effort required without actually
-  // authenticating anyone. With an LMK, a frame the gateway accepts must have
-  // been produced by something holding the key, which is what authentication
-  // means. Costs: peers must be registered on both sides in advance, and the
-  // encrypted peer table is limited to 20 entries.
+#if ESPNOW_ENCRYPT
+  // Install the primary master key before adding any encrypted peer. The PMK
+  // protects the per-peer LMK during setup; the LMK then encrypts the payload.
+  // Both keys must be byte-identical on the two boards.
+  static const uint8_t pmk[16] = ESPNOW_PMK;
+  err = esp_now_set_pmk(pmk);
+  if (err != ESP_OK) {
+    Serial.printf("[NODE] esp_now_set_pmk failed: %s\n", esp_err_to_name(err));
+  }
   static const uint8_t lmk[16] = ESPNOW_LMK;
   memcpy(peer.lmk, lmk, 16);
   peer.encrypt = true;
+  Serial.println("[NODE] ESP-NOW encryption ENABLED (PMK/LMK set)");
+#else
+  peer.encrypt = false;
+  Serial.println("[NODE] ESP-NOW encryption disabled - see report security section");
+#endif
 
   // Retry with backoff, then restart. Without a peer entry every send fails, so
   // carrying on would produce an endless stream of send errors that hides the

@@ -637,6 +637,20 @@ on — which was correct, and which no functional test would have revealed, sinc
 behaves correctly under every non-hostile input. Security properties are not observable by
 testing the happy path.
 
+The first hardware test after enabling encryption produced no packets at all, which appeared
+to indicate that encrypted ESP-NOW could not complete between an associated gateway and an
+unassociated node. That conclusion was wrong. The gateway had roamed to an access point on a
+different channel at some point during the session, and the node was still pinned to the old
+one — the failure described under Limitations, occurring by coincidence during a security
+change. Once the channel was corrected, encryption worked without further modification, and
+has since run continuously with `invalid=0` and `wrong_sender=0`
+(`evidence/08_encrypted_link_verified.txt`).
+
+The methodological point is worth more than the technical one. Two independent faults were
+present simultaneously, and the symptom of the second — no packets arriving — was
+indistinguishable from the expected symptom of a broken first. Attributing the failure to the
+change most recently made was the obvious inference and the wrong one.
+
 ---
 
 ## 8. Testing and results
@@ -791,11 +805,26 @@ broker can occupy the main loop for seconds at a time, delaying queue draining a
 reads. No overflow was observed in testing, but the queue-overflow counter exists so that it
 would be visible rather than silent.
 
-**Manual channel configuration.** If the gateway roams to an access point on a different
-channel, the ESP-NOW link silently stops working while Wi-Fi and MQTT remain healthy. The
-gateway detects and warns about this, but recovery requires manually editing and re-uploading
-Board 1's firmware. On the institutional network used for testing, access points were visible
-on channels 1, 6 and 11, making this a realistic failure mode rather than a theoretical one.
+**Manual channel configuration — observed, not hypothetical.** If the gateway roams to an
+access point on a different channel, the ESP-NOW link stops working while Wi-Fi and MQTT
+remain healthy.
+
+This occurred during testing. The gateway associated on channel 1, and later roamed to a
+different access point on channel 11 while the node remained pinned to channel 1. Delivery
+stopped completely: `espnow_received_count` froze at zero, the node reported
+`FAILED (no ack)` on every transmission, and the gateway continued publishing its own local
+readings to the cloud without interruption. Every indicator that a casual observer would check
+looked healthy.
+
+The incident was diagnosed from the gateway's own boot banner, which reports the active
+channel on every reconnection, and resolved by updating `ESPNOW_CHANNEL` in the node firmware
+and re-uploading. Recovery took under two minutes but required physical access to the node.
+
+Two lessons follow. First, this is the strongest argument in the project for the diagnostic
+output described in §7.5 — without a gateway that reports its own channel, the failure
+presents as "the remote sensor stopped working" with no indication of why. Second, it is the
+reason the demonstration procedure begins by re-reading the channel in the room where the
+demonstration will occur, rather than trusting a value recorded elsewhere.
 
 **Single remote node.** The deduplication state is a single slot rather than an array indexed
 by `src_id`. Supporting additional nodes would require that change, though it is a small one.

@@ -71,6 +71,11 @@ static const float TEMP_MAX_C   =  80.0f;
 static const float HUM_MIN_PCT  =   0.0f;
 static const float HUM_MAX_PCT  = 100.0f;
 
+// ESP-NOW link encryption. MUST match ESPNOW_ENCRYPT in sketch 04.
+// Verified working with this board associated to an access point and the node
+// unassociated. Keys are in secrets.h and must match on both boards.
+#define ESPNOW_ENCRYPT 1
+
 // Guard against isDuplicate() being reduced to a stub again. While this is 0 the
 // sketch prints a warning at boot, because a stub accepts every packet and
 // duplicate_count would never move off zero.
@@ -412,6 +417,10 @@ static void setupEspNow() {
   // poison the deduplication baseline. Requiring a valid ciphertext closes it:
   // a frame that decrypts correctly must have come from something holding the
   // key. The MAC comparison in the callback is retained as defence in depth.
+  char nodeMacStr[18];
+  macToString(NODE_MAC, nodeMacStr, sizeof(nodeMacStr));
+
+#if ESPNOW_ENCRYPT
   static const uint8_t pmk[16] = ESPNOW_PMK;
   err = esp_now_set_pmk(pmk);
   if (err != ESP_OK) {
@@ -431,12 +440,16 @@ static void setupEspNow() {
     Serial.printf("[GATEWAY] esp_now_add_peer failed: %s\n", esp_err_to_name(err));
     Serial.println("[GATEWAY] without an encrypted peer entry nothing can be decrypted");
   }
+  Serial.printf("[GATEWAY] encrypted peer registered: %s (PMK/LMK set)\n", nodeMacStr);
+#else
+  // No peer entry is required to receive unencrypted ESP-NOW. Sender identity
+  // rests on the source MAC comparison in the receive callback, which is a
+  // filter rather than authentication - see the report's security section.
+  Serial.printf("[GATEWAY] encryption disabled; accepting frames only from %s\n", nodeMacStr);
+#endif
 
-  char nodeMacStr[18];
-  macToString(NODE_MAC, nodeMacStr, sizeof(nodeMacStr));
   Serial.printf("[GATEWAY] ESP-NOW listening on channel %u, expecting %u byte packets\n",
                 espnowChannel, (unsigned)sizeof(mesh_packet_t));
-  Serial.printf("[GATEWAY] encrypted peer registered: %s (PMK/LMK set)\n", nodeMacStr);
 }
 
 // ===========================================================================
