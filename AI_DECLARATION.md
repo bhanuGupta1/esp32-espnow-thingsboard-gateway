@@ -2,7 +2,8 @@
 
 **Course:** IA736001 Internet of Things and Cloud Computing
 **Student:** Bhanu Gupta
-**Student ID:** [ REQUIRED — fill in ]
+**Student ID:** 100012452
+**Cohort:** Block 3, 2026
 **Applies to:** Part 1 Case Study Analysis and Part 2 Project Portfolio
 
 ---

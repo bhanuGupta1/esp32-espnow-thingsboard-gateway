@@ -6,8 +6,8 @@
 **Block 3, 2026**
 
 **Student:** Bhanu Gupta
-**Student ID:** [ REQUIRED - fill in ]
-**Cohort:** [ REQUIRED - fill in ]
+**Student ID:** 100012452
+**Cohort:** Block 3, 2026
 **Lecturer:** Dr Senaka Amarakeerthi
 
 ---
