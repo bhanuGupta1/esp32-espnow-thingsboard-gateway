@@ -522,11 +522,20 @@ one connected gateway — which is precisely the pattern this project implements
 
 ## 7. References
 
-> **Verify every entry before submitting.** These are drawn from standard literature in the
-> field and the details are believed correct, but you must locate and read each source. Your
-> institution's library and Google Scholar will resolve the DOIs. Citing a source you have not
-> checked is academic misconduct regardless of who drafted the list. Replace any you cannot
-> verify. Confirm APA 7 formatting against your course guide.
+> **Verification status.** Four entries were checked against published records and their
+> details confirmed exact — Jensen et al. (2017), *IEEE TKDE* 29(11), 2581–2600; Naik (2017),
+> IEEE ISSE; Sethi & Sarangi (2017), Article ID 9324035, DOI 10.1155/2017/9324035; and Yassein
+> et al. (2017), ICEMIS, DOI 10.1109/ICEMIS.2017.8273112. These were the entries whose volume,
+> page or article numbers were most likely to be wrong.
+>
+> **The remaining thirteen have not been individually verified.** They are canonical works in
+> this field — the NIST cloud definition, the OASIS MQTT specification, RFC 1982, the IEEE
+> 802.11 standard, GDPR, the OWASP IoT Top 10, the Espressif and Aosong documentation, and
+> five widely cited survey and edge-computing papers — but you should still locate each one
+> before submitting. Citing a source you have not seen is academic misconduct regardless of
+> who drafted the list.
+>
+> Confirm APA 7 formatting against your course guide, and replace anything you cannot resolve.
 
 Al-Fuqaha, A., Guizani, M., Mohammadi, M., Aledhari, M., & Ayyash, M. (2015). Internet of
 Things: A survey on enabling technologies, protocols, and applications. *IEEE Communications
@@ -594,34 +603,117 @@ MIS (ICEMIS)* (pp. 1–6). IEEE.
 > for you. The prompts below indicate what each paragraph should cover; delete them as you
 > write.
 
+> **8.1 to 8.3 below are drafted from what actually happened during this project.** Read each
+> one and correct anything that does not match your recollection — they are written in your
+> voice and you are signing them. **8.4 and 8.5 are not written**, because they ask about your
+> own industry exposure and background, which cannot be reconstructed from the project record.
+
 ### 8.1 Prior hands-on experience
 
-*[ AUTHENTICITY — your own words. What did you build in the Embedded Systems module? Which
-microcontrollers, sensors or protocols had you used before this project? What transferred
-directly, and what did not? ]*
+My prior hands-on work with comparable technology was an IoT solar-powered car built for the
+Embedded Systems module. That project shared this one's basic shape — a microcontroller
+reading sensors, acting on the results, and reporting state — but differed in the part that
+turned out to matter most here. The car was a self-contained system: sensing and actuation
+happened on the same board, and any communication was between components I controlled
+directly. This project separates sensing from connectivity across two independent devices,
+and almost every difficulty encountered followed from that separation rather than from the
+sensing itself.
+
+Power awareness transferred usefully. Working on a solar-powered platform makes the cost of
+keeping a radio awake a concrete concern rather than an abstract one, and that framing is
+exactly why ESP-NOW is the right protocol for the remote node: a device that can transmit and
+return to sleep in milliseconds, rather than spending seconds on Wi-Fi association and DHCP
+before sending a single byte, is a fundamentally different power proposition.
+
+*[ Add if applicable: which microcontroller the car used, which sensors, and whether it had
+any wireless link. If it used a different board family than the ESP32, say what did and did
+not carry across. ]*
 
 ### 8.2 What I learned during this analysis
 
-*[ AUTHENTICITY — your own words. Two or three specific things you did not know beforehand.
-Candidates from this project, if they match your experience: that an ESP32's single radio
-makes the operating channel a discovered value rather than a chosen one; that eduroam routes
-authentication by RADIUS realm rather than email domain; that replay protection keyed on a
-counter can be turned into a denial of service. ]*
+Three things I did not know before starting.
+
+**The operating channel is discovered, not chosen.** An ESP32 has one radio and therefore one
+channel. Because the gateway must associate with an access point to reach the cloud, and the
+access point decides the channel, the value is only knowable at runtime. I had assumed the
+channel would be a configuration parameter like any other. It is not — it is an output of the
+system, which is why the gateway must be commissioned before the node can even be configured.
+
+**Authentication is not the same as identification.** The packet format carries a source
+identifier, and it was natural to treat that as saying who sent the frame. It does not — it
+is a claim by the sender. The first attempt to fix this checked the source MAC address
+instead, which felt more rigorous but is no better, because a MAC address is equally under the
+attacker's control. Only encryption changed the property being relied on, because a frame that
+decrypts under a shared key must have come from something holding that key.
+
+**Silent failures are the expensive ones.** Several faults in this project produced no error
+message: a channel mismatch causes transmissions to report success while nothing is received,
+and an undersized MQTT buffer causes the publish call to return false and transmit nothing.
+None of these throws an exception. The lesson I have taken is to verify state rather than
+assume it — read the channel back after setting it, check the return value of every publish,
+and count rejected packets explicitly rather than assuming the count is zero.
 
 ### 8.3 Concepts I found most challenging
 
-*[ AUTHENTICITY — your own words. Be specific and honest. What actually took the longest, and
-why? What did you get wrong first? ]*
+The hardest single problem was not a concept but a diagnosis, and I got it wrong before I got
+it right.
+
+After enabling encryption on the radio link, the system stopped delivering packets entirely.
+The obvious inference was that encryption had broken it, and I initially recorded that
+conclusion. It was false. The gateway had roamed to an access point on a different channel at
+some point during the same session, and the node was still pinned to the old one. Two
+independent faults were present at once, and the symptom of the second — no packets arriving —
+was indistinguishable from the expected symptom of the first. Correcting the channel restored
+delivery with encryption untouched.
+
+What made this difficult was that the wrong explanation was entirely reasonable. The failure
+appeared immediately after a specific change, and attributing it to that change is normally
+sound reasoning. What I would do differently is establish a known-good baseline before
+changing anything security-related, so that a regression can be attributed with confidence
+rather than by assumption.
+
+The other genuine difficulty was the institutional Wi-Fi authentication, which consumed more
+time than the ESP-NOW protocol, the deduplication logic and the cloud integration combined.
+Authentication failed with a status code that is returned identically for a wrong password, a
+wrong network, and an out-of-range access point, so the error message carried no diagnostic
+information at all. The cause turned out to be that eduroam routes authentication by RADIUS
+realm rather than by email domain: an address valid for email was not a registered
+authentication realm. I found this by controlled experiment rather than by reasoning, which
+was itself instructive — when a system offers no diagnostic, changing one variable and
+retesting is faster than thinking harder.
 
 ### 8.4 Real-world parallels
 
-*[ AUTHENTICITY — your own words. Where have you seen comparable architecture in industry,
-in previous study, or in employment? ]*
+> **Not written — this section needs content only you can supply.** The brief asks you to
+> "connect the project to real-world applications you have encountered in industry", and I
+> have no record of where you have worked or studied previously.
+>
+> The architecture generalises to any setting where sensing must happen beyond network
+> coverage but aggregation can happen within it. Candidate parallels, if any match something
+> you have actually seen:
+>
+> - Cold-chain monitoring: a gateway at a loading dock serving battery nodes inside chilled storage
+> - Agricultural sensing: one connected gateway at a farmhouse, unconnected nodes across a field
+> - Building management retrofits: running network cable to each sensing point is prohibitive
+> - Retail or warehouse asset tracking: many cheap tags, few connected readers
+>
+> Pick one you have genuinely encountered and describe what you saw. If none, say so and
+> discuss a documented deployment instead, cited properly — that is honest and still earns the
+> marks.
 
 ### 8.5 Insights from my own background
 
-*[ AUTHENTICITY — your own words. What perspective do you bring that another student on this
-course would not? ]*
+> **Not written — this section is about you.**
+>
+> You mentioned leadership. If that is the angle, the useful version is specific rather than
+> general: what did you actually decide or coordinate on this project, and what did it change?
+> There is real material available — the work was split with a project partner, the choice to
+> use institutional Wi-Fi was made knowing it carried risk, and the decision to submit the
+> design for independent adversarial review is what surfaced the security flaw that a
+> functional test would never have found.
+>
+> Two or three sentences naming a decision you made and its consequence will read better than
+> a paragraph asserting a quality.
 
 ---
 
