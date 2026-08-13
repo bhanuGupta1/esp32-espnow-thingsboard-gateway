@@ -5,9 +5,9 @@
 **IA736001 Internet of Things and Cloud Computing**
 **Block 3, 2026**
 
-**Student:** [ your name ]
-**Student ID:** [ your ID ]
-**Cohort:** [ cohort number ]
+**Student:** Bhanu Gupta
+**Student ID:** [ REQUIRED - fill in ]
+**Cohort:** [ REQUIRED - fill in ]
 **Lecturer:** Dr Senaka Amarakeerthi
 
 ---
@@ -60,14 +60,17 @@ cloud traffic: two 26-byte frames every five seconds are consolidated into one a
 the remote node falls silent. Second, the deduplication scheme — keyed on source identifier,
 a random per-boot session identifier, and a sequence number — correctly distinguishes a node
 restart from a replayed packet, which a naive sequence check cannot. Third, and most
-significantly, the security posture is inadequate for deployment: ESP-NOW frames are
-unencrypted and senders are not cryptographically authenticated, so a forged frame carrying a
-high sequence number can advance the deduplication baseline and suppress all legitimate
-traffic from the genuine node until it reboots. This is a denial of service achieved through
-the integrity mechanism itself.
+instructively, the initial design left the radio link unauthenticated. Because the sender
+identifier inside each frame is a claim rather than proof, a forged frame carrying a high
+sequence number could advance the deduplication baseline and suppress all legitimate traffic
+from the genuine node until it rebooted — a denial of service achieved through the integrity
+mechanism itself. The link is now encrypted with a pre-shared key pair, so a frame is accepted
+because it decrypts under a key the sender must hold rather than because of an address the
+sender chose.
 
-The recommendations that follow prioritise ESP-NOW link encryption with pre-shared keys, TLS
-transport for MQTT, and runtime credential provisioning in place of compile-time embedding.
+The remaining recommendations concern the cloud leg and credential handling: TLS transport for
+MQTT in place of plain port 1883, validation of the authentication server certificate, and
+runtime credential provisioning rather than compile-time embedding.
 
 *(≈ 390 words)*
 
@@ -127,11 +130,13 @@ The protocol operates directly above the 802.11 MAC layer with no IP stack, no D
 broker, and provides link-layer acknowledgement — the sender learns whether the frame was
 received, not merely whether it was queued.
 
-**Validation.** The gateway checks the source MAC against the expected node address, then
-verifies exact frame length, protocol version, message type, addressing fields, numeric
-finiteness and plausible sensor ranges. Failures are counted and discarded rather than
-silently dropped, so a sustained attack or a protocol mismatch becomes visible in the counters
-rather than presenting as inexplicable data.
+**Validation.** Frames are first decrypted by the radio driver using the peer's local master
+key; anything that fails to decrypt is discarded before application code runs. The gateway
+then checks the source MAC against the expected node address and verifies exact frame length,
+protocol version, message type, addressing fields, numeric finiteness and plausible sensor
+ranges. Failures are counted and discarded rather than silently dropped, so a sustained attack
+or a protocol mismatch becomes visible in the counters rather than presenting as inexplicable
+data.
 
 **Deduplication.** Accepted frames are tested against the tuple (source, boot identifier,
 sequence). Anything not newer than the highest sequence already accepted within the current
