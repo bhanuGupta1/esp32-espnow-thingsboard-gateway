@@ -86,11 +86,21 @@ the integer pin number, so the code uses `4` and `5` rather than the string labe
 
 ### 2.4 Photographic evidence
 
-- `photo_01_both_boards_no_wire.jpeg` — both boards operating, separately powered, with no
-  physical connection between them. This is the primary evidence that the link is wireless.
-- `photo_02_wiring_detail_dht11.jpeg` — wire colours and DHT11 module.
-- `photo_03_board_on_breadboard.jpeg` — ESP32 straddling the breadboard centre gap, pin
-  labels legible.
+![Both boards operating simultaneously, separately powered, with no physical connection between them](evidence/photo_01_both_boards_no_wire.jpeg)
+
+**Figure 1** — Both boards operating, each powered from its own USB cable, with no wire
+between them. This is the primary evidence that the link is wireless: any data appearing
+on the gateway from the remote node can only have arrived by radio.
+
+![DHT11 module wiring detail showing green, orange and yellow jumper wires](evidence/photo_02_wiring_detail_dht11.jpeg)
+
+**Figure 2** — Wiring detail. Green to `3V3`, orange to `GND`, yellow to the data pin. The
+three-pin DHT11 module carries its own pull-up resistor, so no external component is needed.
+
+![ESP32 DevKit straddling the breadboard centre gap with pin labels visible](evidence/photo_03_board_on_breadboard.jpeg)
+
+**Figure 3** — The ESP32 straddles the breadboard centre gap so that opposing pin rows are
+not shorted together, and the pin labels remain legible for verification.
 
 ---
 
@@ -545,16 +555,28 @@ confirming the readings are live rather than cached at any point in the chain.
 
 ### 8.8 Cloud dashboard
 
-Four screenshots are included:
+![ThingsBoard time-series chart showing both temperature traces on one axis](evidence/dashboard_01_temperature_both_boards.jpg)
 
-1. Time-series chart, both temperature traces on one axis
-2. Time-series chart, both humidity traces
-3. Latest telemetry table, all ten keys with timestamps
-4. Device list showing State = **Active**
+**Figure 4** — Both temperature traces on one axis. Blue is the gateway's local sensor; green
+is the remote node, arriving via ESP-NOW. This is the clearest single visualisation of edge
+aggregation: two physically separate sensors, one of which has no network connection of its
+own, presented as a single cloud stream. The stepped appearance is DHT11 quantisation
+(§9), not a frozen sensor.
 
-The two-temperature chart is the clearest single visualisation of edge aggregation: two
-physically separate sensors, one of which has no network connection of its own, arriving as a
-single cloud stream.
+![ThingsBoard time-series chart showing both humidity traces](evidence/dashboard_02_humidity_both_boards.jpg)
+
+**Figure 5** — Both humidity traces. The same two sources, second measurand.
+
+![ThingsBoard latest telemetry table listing all ten keys with timestamps](evidence/dashboard_03_latest_telemetry_10_keys.jpg)
+
+**Figure 6** — Latest telemetry, showing all ten published keys with timestamps. Both the
+`gateway_*` and `node1_*` families are present in the same update, confirming that the merge
+happens at the edge rather than in the cloud.
+
+![ThingsBoard device list showing P1 Gateway with State set to Active](evidence/dashboard_04_device_state_active.jpg)
+
+**Figure 7** — The device registered as **Active**. ThingsBoard sets this state only on a live
+connection, so the badge is independent confirmation of cloud connectivity.
 
 ---
 
