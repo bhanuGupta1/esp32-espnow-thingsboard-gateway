@@ -478,17 +478,23 @@ in production: a rogue access point advertising the same SSID could harvest the 
 
 ### 7.7 Memory footprint
 
-| Sketch | Flash | % of 1.31 MB |
+Measured with `arduino-cli` against `esp32:esp32:esp32` on core 3.3.3, default partition
+scheme. The full compiler output, core version and library versions are in
+`evidence/07_build_sizes.txt`.
+
+| Sketch | Flash (bytes) | % of 1,310,720 |
 |---|---|---|
-| `01`/`02` — DHT test only | 284 KB | 21% |
-| `03` — adds `WiFi.h` | 885 KB | 67% |
-| `04` — ESP-NOW sender | 898 KB | 68% |
-| `05` — gateway, WPA2-Personal | 915 KB | 69% |
-| `05` — gateway, WPA2-Enterprise | 1012 KB | **77%** |
+| `01` — DHT test only | 284,039 | 21% |
+| `02` — DHT test only | 284,071 | 21% |
+| `03` — adds `WiFi.h` | 885,539 | 67% |
+| `04` — ESP-NOW sender | 898,803 | 68% |
+| `05` — gateway, WPA2-Enterprise | 1,012,651 | **77%** |
 
 Two observations. First, adding `WiFi.h` costs roughly 600 KB — the radio stack, lwIP and
 the network event loop dominate the binary far more than application logic does. Second,
-enabling WPA2-Enterprise costs a further ~97 KB for the PEAP/TLS supplicant.
+enabling WPA2-Enterprise costs a further ~97 KB for the PEAP/TLS supplicant: the same gateway
+sketch built with `WIFI_USE_ENTERPRISE 0` came out at 915,267 bytes (69%), against 1,012,651
+bytes (77%) with PEAP enabled.
 
 ### 7.8 Security
 
@@ -660,9 +666,16 @@ causing every reading to be sent twice with an identical sequence number:
 received=18  duplicates=9  invalid=0
 ```
 
-Exactly half of all received packets were rejected, across 164 transmissions. With the flag
-disabled, the duplicate counter froze while the received counter continued climbing —
-confirming the logic discriminates rather than rejecting indiscriminately.
+While the flag was enabled, exactly half of the packets received were rejected — 9 duplicates
+out of 18 received — which is the expected ratio when every reading is transmitted twice.
+
+The stronger evidence is what happened when the flag was turned off. In
+`evidence/01_gateway_running_state.txt` the duplicate counter sits frozen at 82 across seven
+consecutive publishes while `espnow_received_count` climbs from 630 to 634. The cumulative
+82-of-634 figure is not a one-in-two ratio because duplicate transmission was only enabled for
+part of the session; the meaningful observation is that the counter stops moving the moment
+genuine duplicates stop arriving. That is what distinguishes discriminating logic from logic
+that simply rejects a fixed proportion of traffic.
 
 ### 8.5 Stale detection
 

@@ -377,16 +377,27 @@ static void setupEspNow() {
     }
   }
 
+  // Halt rather than continue if the callback will not register. Without it
+  // nothing can ever be received, and carrying on would print "ESP-NOW
+  // listening" while the gateway was permanently deaf - a far more confusing
+  // failure than stopping with a stated reason.
   err = esp_now_register_recv_cb(onEspNowRecv);
   if (err != ESP_OK) {
     Serial.printf("[GATEWAY] esp_now_register_recv_cb failed: %s\n", esp_err_to_name(err));
+    Serial.println("[GATEWAY] nothing can be received - halting rather than pretending to listen");
+    while (true) {
+      delay(1000);
+    }
   }
 
   // No peer registration here on purpose. The gateway only ever receives, and
   // unencrypted ESP-NOW accepts frames from senders that are not registered as
   // peers. Board 1 is the side that needs a peer entry, because it transmits.
+  char nodeMacStr[18];
+  macToString(NODE_MAC, nodeMacStr, sizeof(nodeMacStr));
   Serial.printf("[GATEWAY] ESP-NOW listening on channel %u, expecting %u byte packets\n",
                 espnowChannel, (unsigned)sizeof(mesh_packet_t));
+  Serial.printf("[GATEWAY] accepting frames only from node MAC %s\n", nodeMacStr);
 }
 
 // ===========================================================================

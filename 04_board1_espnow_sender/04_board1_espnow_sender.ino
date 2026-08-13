@@ -236,9 +236,15 @@ static void setupEspNow() {
   peer.ifidx   = WIFI_IF_STA;
   peer.encrypt = false;  // unencrypted keeps the classroom setup debuggable
 
+  // Halt on failure rather than carrying on. Without a peer entry every send
+  // fails, and looping forever printing send errors hides the actual cause.
   err = esp_now_add_peer(&peer);
   if (err != ESP_OK) {
-    Serial.printf("[NODE] esp_now_add_peer failed: %s\n", esp_err_to_name(err));
+    Serial.printf("[NODE] esp_now_add_peer failed: %s - halting\n", esp_err_to_name(err));
+    Serial.println("[NODE] no peer means every send would fail; fix GATEWAY_MAC or the channel");
+    while (true) {
+      delay(1000);
+    }
   } else {
     char macStr[18];
     macToString(GATEWAY_MAC, macStr, sizeof(macStr));
