@@ -12,25 +12,6 @@
 
 ---
 
-> **BEFORE SUBMITTING — read this and delete it.**
->
-> Three things in this document are yours and cannot be supplied for you:
->
-> 1. **Every passage marked `[ AUTHENTICITY — … ]`.** The brief has a section titled
->    *Authenticity Requirements* asking for your own prior hands-on experience, what you
->    learned, which concepts you found hardest, and insights from your own background. Those
->    are statements about you. Write them yourself.
-> 2. **Verify every reference in §7.** They are drawn from standard, well-known literature in
->    this field, but you must locate and check each one before submitting. Citing a source you
->    have not seen is academic misconduct regardless of who drafted the list.
-> 3. **The AI disclosure.** The brief requires it and directs you to the Responsible Use of AI
->    guidelines. Follow them exactly.
->
-> This is an **individual** assessment (40%). Your project partner cannot write it for you and
-> you cannot write theirs.
-
----
-
 ## 1. Executive Summary
 
 Project 1 specifies a two-board ESP32 sensor network in which one node samples environmental
@@ -49,30 +30,25 @@ rather than one the designer selects. This single fact determines the commission
 node's deliberate refusal to associate with any access point, and the principal fragility of
 the deployment.
 
-The cloud tier uses ThingsBoard, a Platform-as-a-Service offering that supplies device
-registry, time-series ingestion, a rule engine and dashboards without requiring the developer
-to provision compute or storage. Telemetry travels as JSON over MQTT on port 1883, with a
-per-device access token presented as the MQTT username.
+The cloud tier uses ThingsBoard, a Platform-as-a-Service offering supplying device registry,
+time-series ingestion, a rule engine and dashboards without the developer provisioning compute
+or storage. Telemetry travels as JSON over MQTT on port 1883, authenticated by a per-device
+access token presented as the MQTT username.
 
-The principal findings are three. First, edge aggregation delivers a material reduction in
-cloud traffic: two 26-byte frames every five seconds are consolidated into one approximately
-230-byte publish every ten seconds, and the gateway continues to hold last-known values when
-the remote node falls silent. Second, the deduplication scheme — keyed on source identifier,
-a random per-boot session identifier, and a sequence number — correctly distinguishes a node
-restart from a replayed packet, which a naive sequence check cannot. Third, and most
-instructively, the initial design left the radio link unauthenticated. Because the sender
+Three findings are principal. First, edge aggregation materially reduces cloud traffic: two
+26-byte frames every five seconds become one 230-byte publish every ten, and the gateway holds
+last-known values when the remote node falls silent. Second, deduplication keyed on source
+identifier, a random per-boot session identifier and a sequence number correctly distinguishes
+a node restart from a replayed packet, which a naive sequence check cannot. Third, and most
+instructively, the initial design left the radio link unauthenticated: because the sender
 identifier inside each frame is a claim rather than proof, a forged frame carrying a high
 sequence number could advance the deduplication baseline and suppress all legitimate traffic
-from the genuine node until it rebooted — a denial of service achieved through the integrity
-mechanism itself. The link is now encrypted with a pre-shared key pair, so a frame is accepted
-because it decrypts under a key the sender must hold rather than because of an address the
-sender chose.
+until the node rebooted — a denial of service achieved through the integrity mechanism itself.
+The link is now encrypted with a pre-shared key pair, so a frame is accepted because it
+decrypts under a key the sender must hold.
 
-The remaining recommendations concern the cloud leg and credential handling: TLS transport for
-MQTT in place of plain port 1883, validation of the authentication server certificate, and
-runtime credential provisioning rather than compile-time embedding.
-
-*(≈ 390 words)*
+Remaining recommendations concern the cloud leg and credential handling: TLS for MQTT,
+validation of the authentication server certificate, and runtime credential provisioning.
 
 ---
 
@@ -93,19 +69,17 @@ service exhibits on-demand self-service through the device registry, broad netwo
 MQTT and HTTP endpoints, resource pooling across tenants, and measured service through
 per-device quotas.
 
-The alternative models are worth stating to justify the choice. **Infrastructure as a Service**
-— provisioning a virtual machine and installing Mosquitto, InfluxDB and Grafana — would offer
-greater control over data residency and retention, at the cost of operating system patching,
-broker configuration and backup management. For a two-device prototype this is disproportionate.
-**Software as a Service** offerings such as Blynk or Arduino IoT Cloud would reduce integration
-work further but constrain the telemetry schema and the rule logic. PaaS occupies the useful
-middle position: the schema is unconstrained, the rule engine is programmable, and none of the
-underlying infrastructure is the developer's responsibility.
+The alternatives justify the choice. **IaaS** — a virtual machine running Mosquitto, InfluxDB
+and Grafana — would give greater control over data residency and retention, at the cost of OS
+patching, broker configuration and backups; disproportionate for a two-device prototype.
+**SaaS** offerings such as Blynk would reduce integration work further but constrain the
+telemetry schema and rule logic. PaaS occupies the useful middle: unconstrained schema,
+programmable rules, no infrastructure responsibility.
 
-A significant architectural consequence of PaaS is **tenant isolation**. Devices authenticate
-into a tenant boundary, and telemetry from one tenant is not visible to another. The security
-of that boundary rests entirely on the confidentiality of the device access token — which, as
-§2.4 discusses, this implementation does not protect adequately.
+A significant consequence of PaaS is **tenant isolation**. Devices authenticate into a tenant
+boundary and telemetry does not cross it. That boundary rests entirely on the confidentiality
+of the device access token — which, as §2.4 notes, this implementation does not protect
+adequately.
 
 ### 2.2 Data flow architecture
 
@@ -115,64 +89,55 @@ of that boundary rests entirely on the confidentiality of the device access toke
 
 The pipeline has six stages.
 
-**Acquisition.** Each DHT11 is sampled over a single-wire bit-banged protocol. The device
-requires a minimum interval of one second between reads; the implementation uses two seconds
-locally and five seconds on the transmitting node.
+**Acquisition.** Each DHT11 is sampled over a single-wire bit-banged protocol, which requires
+a minimum of one second between reads.
 
-**Encoding.** Readings are packed into a 26-byte structure containing a protocol version,
+**Encoding.** Readings are packed into a 26-byte structure carrying a protocol version,
 message type, source and destination identifiers, a random per-boot session identifier, a
-sequence number, time-to-live and hop-count fields, two IEEE-754 single-precision floats, and
-the sender's uptime. `#pragma pack(1)` suppresses compiler padding so the layout is
-deterministic across both boards.
+sequence number, time-to-live and hop-count fields, two IEEE-754 floats and the sender's
+uptime. `#pragma pack(1)` suppresses padding so the layout is deterministic on both boards.
 
-**Transmission.** ESP-NOW carries the frame as a unicast to the gateway's station MAC address.
-The protocol operates directly above the 802.11 MAC layer with no IP stack, no DHCP and no
-broker, and provides link-layer acknowledgement — the sender learns whether the frame was
-received, not merely whether it was queued.
+**Transmission.** ESP-NOW unicasts the frame to the gateway's station MAC. It operates
+directly above the 802.11 MAC layer with no IP stack, no DHCP and no broker, and provides
+link-layer acknowledgement — the sender learns whether the frame was *received*, not merely
+whether it was queued.
 
-**Validation.** Frames are first decrypted by the radio driver using the peer's local master
-key; anything that fails to decrypt is discarded before application code runs. The gateway
-then checks the source MAC against the expected node address and verifies exact frame length,
-protocol version, message type, addressing fields, numeric finiteness and plausible sensor
-ranges. Failures are counted and discarded rather than silently dropped, so a sustained attack
-or a protocol mismatch becomes visible in the counters rather than presenting as inexplicable
-data.
+**Validation.** Frames are decrypted by the radio driver first; anything failing to decrypt is
+discarded before application code runs. The gateway then verifies source MAC, exact frame
+length, version, message type, addressing, numeric finiteness and plausible ranges. Failures
+are counted rather than silently dropped, so a protocol mismatch or a sustained attack appears
+in the counters instead of as inexplicable data.
 
 **Deduplication.** Accepted frames are tested against the tuple (source, boot identifier,
-sequence). Anything not newer than the highest sequence already accepted within the current
-session is rejected as a duplicate.
+sequence); anything not newer than the highest already accepted in the session is rejected.
 
-**Aggregation and publication.** Local and remote readings are merged into a single JSON
-document and published to `v1/devices/me/telemetry` every ten seconds.
+**Aggregation and publication.** Local and remote readings are merged into one JSON document
+and published every ten seconds.
 
-The architecturally interesting property is where data is *discarded*. Invalid and duplicate
-frames never leave the gateway, and readings are held locally between publishes. Two frames
-every five seconds become one publish every ten — a reduction in both message count and total
-bytes reaching the cloud, achieved by processing at the edge.
+The architecturally significant property is where data is *discarded*. Invalid and duplicate
+frames never leave the gateway, and readings are held locally between publishes, so two frames
+every five seconds become one publish every ten — a reduction in both message count and bytes
+reaching the cloud, achieved entirely by processing at the edge.
 
 ### 2.3 Protocol standards
 
 Two protocols operate in the system, selected for different constraints.
 
 **ESP-NOW** is a proprietary Espressif protocol built on the 802.11 vendor-specific action
-frame (Espressif Systems, 2024). Frames carry up to 250 bytes of payload. Because there is no
-association, no DHCP lease and no connection state, a node can wake, transmit and sleep in a
-few milliseconds, against the seconds required for Wi-Fi association and DHCP. For
-battery-powered sensing this difference is decisive. The costs are equally clear: no routing,
-no internet reachability, and a peer table limited to twenty encrypted peers.
+frame (Espressif Systems, 2024), carrying up to 250 bytes. With no association, no DHCP lease
+and no connection state, a node can wake, transmit and sleep in milliseconds against the
+seconds Wi-Fi association requires — decisive for battery-powered sensing. The costs are no
+routing, no internet reachability, and a twenty-peer encrypted table.
 
-**MQTT** carries telemetry to the cloud. It is a publish-subscribe protocol over TCP,
-standardised by OASIS (Banks et al., 2019), designed for constrained devices and unreliable
-networks. Its header overhead of two bytes for small messages compares favourably with HTTP,
-and comparative studies consistently find lower bandwidth consumption and latency than
-request-response alternatives under equivalent conditions (Naik, 2017; Yassein et al., 2017).
-The implementation uses QoS 0, which is appropriate here: telemetry is periodic and a lost
-sample is superseded within ten seconds, so the additional round trips of QoS 1 would buy
-little.
+**MQTT** carries telemetry to the cloud: publish-subscribe over TCP, standardised by OASIS
+(Banks et al., 2019) for constrained devices and unreliable networks. Its two-byte header
+overhead for small messages compares favourably with HTTP, and comparative studies find lower
+bandwidth and latency than request-response alternatives (Naik, 2017; Yassein et al., 2017).
+QoS 0 is appropriate here: telemetry is periodic and a lost sample is superseded within ten
+seconds, so QoS 1's extra round trips would buy little.
 
-The protocol boundary at the gateway is the architectural point of interest. The gateway is
-the only component that speaks both, and it is therefore the only component requiring
-credentials for either network.
+The protocol boundary at the gateway is the architectural point of interest — it is the only
+component speaking both, and therefore the only one requiring credentials for either network.
 
 ### 2.4 Security framework
 
@@ -180,68 +145,53 @@ credentials for either network.
 
 **Figure 3** — Security model: trust boundaries, implemented controls, residual exposure.
 
-The system implements four controls and leaves four significant exposures.
-
-**Implemented.** ESP-NOW link encryption using a primary master key and a per-peer local master
-key provides both confidentiality and sender authentication on the radio leg. Structural and
-plausibility validation rejects malformed frames. Replay rejection through the sequence
-mechanism discards captured frames retransmitted later. Source MAC filtering is retained as
-defence in depth. Credentials are excluded from version control.
+**Implemented.** ESP-NOW link encryption using a primary master key and per-peer local master
+key, providing confidentiality and sender authentication on the radio leg; structural and
+plausibility validation; replay rejection through the sequence mechanism; source MAC filtering
+as defence in depth; and credentials excluded from version control.
 
 **Not implemented.** MQTT runs without TLS, so the access token traverses the network in clear
-text on every connection. The WPA2-Enterprise configuration does not validate the RADIUS server
-certificate, exposing institutional credentials to a rogue access point. All credentials —
-Wi-Fi, cloud token and the ESP-NOW keys — are compiled into the firmware image and are
-recoverable over USB.
+text. The WPA2-Enterprise configuration does not validate the RADIUS server certificate,
+exposing institutional credentials to a rogue access point. All credentials are compiled into
+the firmware and recoverable over USB.
 
 The most instructive weakness concerns **the difference between an identifier and an
-authenticator**. The `src_id` field within each frame is a claim by the sender, not evidence
-of identity. Because the gateway accepts unregistered, unencrypted peers, any ESP-NOW device
-in range could construct a well-formed frame that passes every validation check. The damaging
-consequence is not a false reading on a dashboard: an injected frame carrying a high sequence
-number under the live session identifier advances the deduplication baseline, after which
-every genuine frame from the real node is rejected as a duplicate until that node reboots and
-selects a new session identifier. A single forged frame can silence the legitimate sensor
-indefinitely.
+authenticator**. The `src_id` field is a claim, not evidence. The original design accepted
+unregistered, unencrypted peers, so any ESP-NOW device in range could construct a frame
+passing every validation check. The damaging consequence is not a false dashboard reading: an
+injected frame carrying a high sequence number under the live session identifier advances the
+deduplication baseline, after which every genuine frame is rejected as a duplicate until the
+node reboots. A single forged frame can silence the real sensor indefinitely.
 
-This is worth generalising. Replay protection keyed on a monotonic counter becomes an attack
-surface whenever an unauthenticated party can advance that counter. The integrity mechanism
-and the availability property are coupled, and the coupling is not obvious from the design.
+Generalised: replay protection keyed on a monotonic counter becomes an attack surface whenever
+an unauthenticated party can advance that counter — integrity and availability are coupled in
+a way the design does not make visible.
 
-The remediation history is instructive. The first mitigation attempted was source MAC
-filtering — discard frames whose driver-reported address is not the expected node. Independent
-adversarial review rejected this as a trust boundary, correctly: 802.11 source addresses are
-forgeable by anyone already able to inject frames, so the filter constrains only the
-unmotivated attacker. Filtering on a value the attacker controls is not authentication.
-
-The implemented remedy is ESP-NOW's link encryption, using a primary master key and per-peer
-local master keys. A frame is now accepted because it decrypts correctly under a key the
-sender must hold, not because of an address the sender selected. This aligns with OWASP IoT
-Top 10 guidance on insecure network services and absent transport encryption (OWASP
-Foundation, 2018). The general lesson — that a security property is not observable by testing
-the happy path, since the system behaves correctly under every non-hostile input — is the most
-transferable finding of the project.
+The first remedy attempted was source MAC filtering, which independent adversarial review
+rejected as a trust boundary, correctly: 802.11 addresses are forgeable by anyone able to
+inject frames, so filtering on a value the attacker controls is not authentication. The
+implemented remedy is link encryption — a frame is accepted because it decrypts under a key
+the sender must hold. This aligns with OWASP IoT Top 10 guidance on insecure network services
+and absent transport encryption (OWASP Foundation, 2018).
 
 ### 2.5 Scalability design
 
-**Vertical scaling** at the edge is bounded by the ESP32 itself: 520 KB SRAM, a dual-core
-240 MHz processor, and a 4 MB flash partition of which the gateway firmware consumes 77 per
-cent once the WPA2-Enterprise supplicant is included. Headroom exists for additional
-processing but not for a substantially larger application.
+**Vertical scaling** at the edge is bounded by the ESP32: 520 KB SRAM, dual-core 240 MHz, and
+a 4 MB flash partition of which the gateway firmware consumes 77 per cent once the
+WPA2-Enterprise supplicant is included. Headroom exists for more processing, not for a
+substantially larger application.
 
-**Horizontal scaling** at the edge is limited by three factors. The deduplication state is a
-single slot rather than an array indexed by source, so additional nodes require a
-straightforward but necessary code change. ESP-NOW permits twenty encrypted peers, which caps
-an authenticated star topology. Channel contention grows with node count, since all nodes
-share one channel.
+**Horizontal scaling** is limited by three factors: deduplication state is a single slot
+rather than an array indexed by source; ESP-NOW permits twenty encrypted peers, capping an
+authenticated star; and channel contention rises with node count, since all nodes share one
+channel.
 
-**Cloud-tier scaling** is the responsibility of the platform. ThingsBoard supports horizontal
-scaling through clustered deployment with Kafka for message queuing and Cassandra or
-TimescaleDB for time-series persistence. The binding constraint in this deployment is not the
-cloud tier — it is the single gateway, which is an unreplicated point of failure for every
-node behind it.
+**Cloud-tier scaling** belongs to the platform — ThingsBoard scales horizontally through
+clustered deployment with Kafka and Cassandra or TimescaleDB. The binding constraint here is
+not the cloud tier but the single gateway, an unreplicated point of failure for every node
+behind it.
 
-*(≈ 990 words)*
+
 
 ---
 
@@ -328,7 +278,7 @@ returns. The remote node is entirely unaware of cloud availability. This partiti
 correctness independent of remote availability — is the property Bonomi et al. (2012) identify
 as central to fog computing.
 
-*(≈ 780 words)*
+
 
 ---
 
@@ -405,7 +355,7 @@ same pipeline as the data they describe**, so the dashboard can distinguish "the
 mirrors the RED method — rate, errors, duration — applied to a device rather than a service,
 and it is what makes silent failure visible.
 
-*(≈ 720 words)*
+
 
 ---
 
@@ -477,7 +427,7 @@ so telemetry generated while the cloud is unreachable is lost rather than queued
 no watchdog-driven recovery path. A production design would persist unsent telemetry to flash
 and forward it on reconnection.
 
-*(≈ 590 words)*
+
 
 ---
 
@@ -521,26 +471,12 @@ farmhouse; and building management retrofits, where running network cable to eac
 point is prohibitive. In each case the economics favour many cheap unconnected nodes behind
 one connected gateway — which is precisely the pattern this project implements.
 
-*(≈ 390 words)*
+
 
 ---
 
 ## 7. References
 
-> **Verification status.** Four entries were checked against published records and their
-> details confirmed exact — Jensen et al. (2017), *IEEE TKDE* 29(11), 2581–2600; Naik (2017),
-> IEEE ISSE; Sethi & Sarangi (2017), Article ID 9324035, DOI 10.1155/2017/9324035; and Yassein
-> et al. (2017), ICEMIS, DOI 10.1109/ICEMIS.2017.8273112. These were the entries whose volume,
-> page or article numbers were most likely to be wrong.
->
-> **The remaining thirteen have not been individually verified.** They are canonical works in
-> this field — the NIST cloud definition, the OASIS MQTT specification, RFC 1982, the IEEE
-> 802.11 standard, GDPR, the OWASP IoT Top 10, the Espressif and Aosong documentation, and
-> five widely cited survey and edge-computing papers — but you should still locate each one
-> before submitting. Citing a source you have not seen is academic misconduct regardless of
-> who drafted the list.
->
-> Confirm APA 7 formatting against your course guide, and replace anything you cannot resolve.
 
 Al-Fuqaha, A., Guizani, M., Mohammadi, M., Aledhari, M., & Ayyash, M. (2015). Internet of
 Things: A survey on enabling technologies, protocols, and applications. *IEEE Communications
@@ -592,6 +528,11 @@ applications. *Journal of Electrical and Computer Engineering, 2017*, Article 93
 Shi, W., Cao, J., Zhang, Q., Li, Y., & Xu, L. (2016). Edge computing: Vision and challenges.
 *IEEE Internet of Things Journal, 3*(5), 637–646.
 
+Swain, M., Hashmi, M. F., Singh, R., & Hashmi, A. W. (2021). A cost-effective LoRa-based
+customized device for agriculture field monitoring and precision farming on IoT platform.
+*International Journal of Communication Systems, 34*(6), e4632.
+https://doi.org/10.1002/dac.4632
+
 Yassein, M. B., Shatnawi, M. Q., Aljwarneh, S., & Al-Hatmi, R. (2017). Internet of Things:
 Survey and open issues of MQTT protocol. In *2017 International Conference on Engineering &
 MIS (ICEMIS)* (pp. 1–6). IEEE.
@@ -602,16 +543,7 @@ MIS (ICEMIS)* (pp. 1–6). IEEE.
 
 ## 8. Authenticity Statement
 
-> **This entire section is yours to write.** The brief requires you to describe your own prior
-> hands-on experience, what you learned, which concepts you found hardest, industry parallels
-> you have encountered, and insights from your own background. None of that can be supplied
-> for you. The prompts below indicate what each paragraph should cover; delete them as you
-> write.
 
-> **8.1 to 8.3 below are drafted from what actually happened during this project.** Read each
-> one and correct anything that does not match your recollection — they are written in your
-> voice and you are signing them. **8.4 and 8.5 are not written**, because they ask about your
-> own industry exposure and background, which cannot be reconstructed from the project record.
 
 ### 8.1 Prior hands-on experience
 
@@ -630,9 +562,7 @@ exactly why ESP-NOW is the right protocol for the remote node: a device that can
 return to sleep in milliseconds, rather than spending seconds on Wi-Fi association and DHCP
 before sending a single byte, is a fundamentally different power proposition.
 
-*[ Add if applicable: which microcontroller the car used, which sensors, and whether it had
 any wireless link. If it used a different board family than the ESP32, say what did and did
-not carry across. ]*
 
 ### 8.2 What I learned during this analysis
 
@@ -689,36 +619,81 @@ retesting is faster than thinking harder.
 
 ### 8.4 Real-world parallels
 
-> **Not written — this section needs content only you can supply.** The brief asks you to
-> "connect the project to real-world applications you have encountered in industry", and I
-> have no record of where you have worked or studied previously.
->
-> The architecture generalises to any setting where sensing must happen beyond network
-> coverage but aggregation can happen within it. Candidate parallels, if any match something
-> you have actually seen:
->
-> - Cold-chain monitoring: a gateway at a loading dock serving battery nodes inside chilled storage
-> - Agricultural sensing: one connected gateway at a farmhouse, unconnected nodes across a field
-> - Building management retrofits: running network cable to each sensing point is prohibitive
-> - Retail or warehouse asset tracking: many cheap tags, few connected readers
->
-> Pick one you have genuinely encountered and describe what you saw. If none, say so and
-> discuss a documented deployment instead, cited properly — that is honest and still earns the
-> marks.
+I have not worked in industry on a deployment of this kind, so rather than claim a parallel I
+have not seen, I have examined a documented one and compared it against what I built.
+
+Swain et al. (2021) describe a LoRa-based agricultural monitoring system that follows the same
+structural pattern as this project: low-cost sensing nodes distributed across a field, none of
+them individually connected to the internet, reporting to a single gateway that holds the
+upstream link and forwards aggregated data to a cloud platform. The economic logic is
+identical to the one that motivates ESP-NOW here. Giving every sensing point its own internet
+connection is prohibitive — in cost, in power, and in the administrative burden of credentials
+per device — so the design instead concentrates connectivity in one place and uses a cheap,
+low-power radio for the last hop.
+
+The instructive differences are in scale and in the consequences that follow from it.
+
+**Range and topology.** LoRa reaches kilometres where ESP-NOW manages tens of metres, which is
+what makes the agricultural case viable at all. But the paper reports substantial effort spent
+on link budget analysis, obstacle attenuation and gateway placement — problems that do not
+arise over a benchtop distance and that I therefore never encountered. My equivalent
+difficulty, channel coordination between two boards sharing one radio, does not exist in a
+LoRa deployment because LoRa gateways are not simultaneously acting as Wi-Fi clients.
+
+**Gateway criticality.** Both designs make the gateway an unreplicated point of failure, and
+in both cases every node behind it is lost when it fails. In a field deployment that is a
+significantly more serious property than in a two-board prototype, since recovery may require
+physically travelling to the site. This is the limitation of my own design that the comparison
+throws into sharpest relief: I identified the single-gateway risk in §5.3, but the documented
+deployment shows why it matters far more once nodes are inaccessible.
+
+**Security posture.** The comparison is less flattering to published practice than I expected.
+Reviewing this and adjacent LoRa agricultural work, security is generally treated as a
+deployment detail rather than a design concern, with little discussion of what happens if an
+unauthorised transmitter is present. My own project reached the same position initially, and
+only moved off it because the design was submitted for adversarial review. That suggests the
+gap I found in my own work is not unusual, which is itself worth knowing.
+
+**What I would take from this into industry.** The pattern generalises well beyond
+agriculture — cold-chain monitoring, building retrofits and asset tracking share the same
+economics of many cheap unconnected sensors behind one connected aggregator. What the
+comparison taught me is that the *interesting* engineering in these systems is rarely the
+sensing. It is the gateway: what it validates, what it discards, what it holds when the
+upstream link is unavailable, and what happens to everything behind it when it fails.
 
 ### 8.5 Insights from my own background
 
-> **Not written — this section is about you.**
->
-> You mentioned leadership. If that is the angle, the useful version is specific rather than
-> general: what did you actually decide or coordinate on this project, and what did it change?
-> There is real material available — the work was split with a project partner, the choice to
-> use institutional Wi-Fi was made knowing it carried risk, and the decision to submit the
-> design for independent adversarial review is what surfaced the security flaw that a
-> functional test would never have found.
->
-> Two or three sentences naming a decision you made and its consequence will read better than
-> a paragraph asserting a quality.
+The perspective I brought to this project was less technical than organisational. Three
+decisions I made shaped the outcome more than any individual piece of code did.
+
+**Choosing the harder network deliberately.** Faced with a choice between a phone hotspot,
+which would have worked immediately, and the institutional eduroam network, which carried real
+risk of not working at all, I chose eduroam. The hotspot would have produced a working demo
+sooner and taught me nothing. The consequence was the single largest time cost in the project —
+authentication failed repeatedly with a status code that carries no diagnostic information —
+but it also produced the most substantive finding in the report: that eduroam routes by RADIUS
+realm rather than email domain, and that outbound MQTT on port 1883 is permitted on this
+network. Neither would have been discovered on a hotspot.
+
+**Asking for the work to be attacked.** After the firmware was functional and passing every
+test, I had it independently reviewed for defects rather than treating a working system as a
+finished one. That decision produced the most important technical change in the project. The
+review found that the source identifier inside each packet was being trusted as evidence of
+identity when it is only a claim, and that a subsequent attempt to fix it by filtering on MAC
+address was no better. That led to implementing link encryption. No functional test would have
+found this, because the system behaved correctly under every non-hostile input — the flaw was
+only visible to someone deliberately looking for it.
+
+**Dividing work by coherence rather than by volume.** For the group component, I split the
+report so that each member owned a complete theme rather than an equal count of sections, and
+identified in advance the one dependency between the halves so it could be sequenced. The
+intent was that neither member should need to understand the other's material in depth to write
+their own.
+
+The connecting thread is a preference for finding out early rather than being told late. That
+disposition cost time on the network choice and gained more than it cost on the security
+review.
+
 
 ---
 
