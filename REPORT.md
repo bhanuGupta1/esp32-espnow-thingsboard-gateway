@@ -464,7 +464,60 @@ would be visible rather than silent if it happened. A production design would us
 asynchronous MQTT client or a bounded connection timeout, and would schedule the next attempt
 from the completion of the last one with exponential backoff.
 
-### 7.6 Wi-Fi: WPA2-Enterprise
+### 7.6 Bidirectional control and store-and-forward
+
+Two capabilities distinguish this implementation from a telemetry-only device.
+
+#### Server-to-device RPC
+
+Telemetry alone makes a device *observable*. It does not make it *manageable* — an operator
+can see what a sensor reports but cannot change how it behaves without physical access. The
+gateway therefore subscribes to `v1/devices/me/rpc/request/+` and replies on the matching
+response topic, which is what makes the MQTT link bidirectional rather than a one-way feed.
+
+Three methods are implemented:
+
+| Method | Params | Behaviour |
+|---|---|---|
+| `getStatus` | none | Returns node liveness, packet counters, queue depth, current interval and radio channel |
+| `setPublishInterval` | milliseconds | Changes the telemetry cadence at runtime, within bounds |
+| `resetCounters` | none | Zeroes the diagnostic counters without rebooting |
+
+Two design decisions are worth defending. First, `setPublishInterval` is **range-checked and
+rejected** rather than clamped: accepting a value silently different from the one requested
+would leave the operator believing something untrue about the device. The bounds (2 s to 300 s)
+prevent both a broker flood and a device that has effectively stopped reporting. Second, the
+handler runs on the Arduino task rather than a network task, because PubSubClient dispatches
+callbacks from `mqtt.loop()` — so unlike the ESP-NOW receive callback, ordinary blocking code
+is safe here.
+
+The subscription is re-issued on every reconnection rather than once at startup. MQTT
+subscriptions are session state and are discarded when the connection drops, so a device that
+subscribed only at boot would continue publishing normally after a reconnect while silently
+ignoring every command — a failure that looks like nothing at all from the dashboard.
+
+#### Store-and-forward buffering
+
+Earlier versions discarded telemetry generated while the broker was unreachable. Given that
+Wi-Fi reconnection and MQTT retries are both expected events rather than exceptional ones,
+that meant routine network interruptions produced permanent gaps in the record.
+
+The gateway now holds unsent payloads in a fixed-size ring buffer of twelve slots — roughly two
+minutes of outage at the default cadence — and flushes them oldest-first once the broker is
+reachable again. Three properties matter:
+
+- **Bounded.** A ring cannot exhaust memory during a long outage. When full, the oldest entry
+  is overwritten and counted in `dropped_total`, so loss is visible rather than silent.
+- **Ordered.** The flush stops at the first failed publish and leaves the remainder queued,
+  so the cloud never receives readings out of sequence.
+- **Recent-biased.** Overwriting the oldest is the correct trade for telemetry, where a
+  reading from two minutes ago matters less than the one just taken.
+
+The buffer is held in RAM rather than flash. That is a deliberate limit: it survives a network
+outage, which is the failure it was built for, but not a power loss. Flash-backed storage would
+cover both at the cost of write-endurance management.
+
+### 7.7 Wi-Fi: WPA2-Enterprise
 
 The deployment network is an institutional eduroam service using WPA2-Enterprise with
 802.1X/PEAP rather than a pre-shared key. The installed core supports this
@@ -476,7 +529,7 @@ certificate is not validated. This is what allows the connection to succeed with
 an institutional CA certificate, and it is also why the configuration would be unacceptable
 in production: a rogue access point advertising the same SSID could harvest the credentials.
 
-### 7.7 Memory footprint
+### 7.8 Memory footprint
 
 Measured with `arduino-cli` against `esp32:esp32:esp32` on core 3.3.3, default partition
 scheme. The full compiler output, core version and library versions are in
@@ -496,13 +549,13 @@ enabling WPA2-Enterprise costs a further ~97 KB for the PEAP/TLS supplicant: the
 sketch built with `WIFI_USE_ENTERPRISE 0` came out at 915,267 bytes (69%), against 1,012,651
 bytes (77%) with PEAP enabled.
 
-### 7.8 Security
+### 7.9 Security
 
 This section sets out what the system defends against, what it does not, and why. The
 distinction matters: a prototype that is honest about its exposure is more useful than one
 that claims a security posture it does not have.
 
-#### 7.8.1 Threat model
+#### 7.9.1 Threat model
 
 Four attackers are worth considering for a system of this shape.
 
@@ -516,7 +569,7 @@ Four attackers are worth considering for a system of this shape.
 The first and third are confidentiality problems; the second is an integrity and availability
 problem, and it is the one with the most interesting consequences.
 
-#### 7.8.2 What is defended
+#### 7.9.2 What is defended
 
 **Input validation.** Every arriving frame is checked for exact length, protocol version,
 message type, destination ID, source ID, finiteness, and plausible sensor ranges (§5.4).
@@ -534,7 +587,7 @@ naming as such.
 primary master key and a per-peer local master key, and both boards register each other as
 encrypted peers. A frame the gateway accepts must therefore decrypt correctly under a key held
 by only the two boards, which is what makes it evidence of origin rather than a claim of
-origin. §7.8.3 describes the attack this closes and why the weaker measure it replaced was
+origin. §7.9.3 describes the attack this closes and why the weaker measure it replaced was
 insufficient.
 
 **Sender address filtering.** The gateway additionally compares the driver-reported source MAC
@@ -546,7 +599,7 @@ from version control by `.gitignore`; `secrets.example.h` carries placeholders o
 repository is private, and the published archive was scanned for credential strings before
 distribution.
 
-#### 7.8.3 The sender-authentication problem
+#### 7.9.3 The sender-authentication problem
 
 This is worth setting out in full, because it is the most instructive weakness in the design.
 
@@ -588,7 +641,7 @@ in advance on both sides, that the encrypted peer table is limited to 20 entries
 keys are one more secret to manage — they live in each sketch's gitignored `secrets.h` and, as
 with every other credential here, are recoverable from flash over USB.
 
-#### 7.8.4 What is not defended, and why
+#### 7.9.4 What is not defended, and why
 
 **MQTT runs on port 1883 without TLS.** The ThingsBoard access token is transmitted as the
 MQTT username in clear text on every connection. Anyone able to observe traffic between the
@@ -599,7 +652,7 @@ and the fix is to use it; it was not done here because the classroom configurati
 1883.
 
 **RADIUS server certificates are not validated.** The WPA2-Enterprise configuration passes
-`NULL` for the CA bundle (§7.6), so the gateway will authenticate to any access point
+`NULL` for the CA bundle (§7.7), so the gateway will authenticate to any access point
 advertising the target SSID. A rogue AP could therefore capture the institutional credentials
 via a PEAP downgrade. Validating the certificate requires shipping the institution's CA
 certificate in the firmware.
@@ -610,7 +663,7 @@ personal account credentials, so a flashed board should be treated as a device t
 its owner's login. Provisioning into NVS at first boot, rather than compiling values in, would
 remove this exposure.
 
-#### 7.8.5 Summary
+#### 7.9.5 Summary
 
 | Control | Status |
 |---|---|
@@ -795,7 +848,7 @@ few hundred milliwatts within centimetres of its own sensor. The gap narrowed on
 boards reached thermal equilibrium, indicating the effect is a combination of genuine
 self-heating, thermal lag, and DHT11 part-to-part tolerance (±2 °C rated).
 
-**Security.** Set out in full in §7.8. The radio link is encrypted and sender-authenticated,
+**Security.** Set out in full in §7.9. The radio link is encrypted and sender-authenticated,
 but MQTT runs without TLS so the access token crosses the network in clear text, RADIUS
 certificates are not validated, and all credentials — including the ESP-NOW keys — are
 compiled into flash and recoverable over USB.
@@ -804,6 +857,12 @@ compiled into flash and recoverable over USB.
 broker can occupy the main loop for seconds at a time, delaying queue draining and sensor
 reads. No overflow was observed in testing, but the queue-overflow counter exists so that it
 would be visible rather than silent.
+
+**Buffering is bounded and volatile.** The store-and-forward ring holds twelve payloads —
+about two minutes at the default cadence. A longer outage overwrites the oldest entries, which
+is counted in `dropped_total` rather than hidden, but is still data loss. The buffer is in RAM,
+so it survives a network outage but not a power cycle. Both are deliberate trades rather than
+oversights, and §11 records what closing them would require.
 
 **Manual channel configuration — observed, not hypothetical.** If the gateway roams to an
 access point on a different channel, the ESP-NOW link stops working while Wi-Fi and MQTT
@@ -872,11 +931,18 @@ the packet format but is not demonstrated, and cannot be with two radios.
 
 1. **A third node**, to actually exercise `ttl` and `hop_count` and turn the mesh-ready
    design into a demonstrated one.
-2. **Encrypted ESP-NOW** and **TLS MQTT on port 8883**, closing the two plaintext paths.
-3. **Credentials in NVS**, provisioned at first boot rather than compiled in.
-4. **Automatic channel recovery** — the gateway could publish its current channel, and nodes
-   could scan for the gateway rather than being hard-coded to one channel.
-5. **A higher-resolution sensor** (SHT31, BME280) to remove the quantisation artefacts.
+2. **TLS MQTT on port 8883**, closing the one remaining plaintext path now that the radio
+   link is encrypted.
+3. **Credentials in NVS**, provisioned at first boot rather than compiled in — which would
+   also remove the ESP-NOW keys from the firmware image.
+4. **Over-the-air firmware update.** Currently every change requires physical access to both
+   boards. This is the change with the greatest operational impact, since the channel-roam
+   incident in §9 required exactly that physical access to resolve.
+5. **Automatic channel recovery** — the node could scan for the gateway rather than being
+   pinned to a hard-coded channel, which would have prevented that incident entirely.
+6. **Flash-backed buffering**, so the store-and-forward queue survives power loss as well as
+   network loss.
+7. **A higher-resolution sensor** (SHT31, BME280) to remove the quantisation artefacts.
 
 ### 11.1 Reflection
 
@@ -990,3 +1056,16 @@ during testing, several of them did precisely that.
 | `node1_online` | boolean | False once `node1_age_ms` exceeds 20000 |
 | `duplicate_count` | number | Packets rejected as duplicates since boot |
 | `espnow_received_count` | number | Packets passing validation since boot |
+| `buffered_now` | number | Payloads currently queued awaiting the broker |
+| `buffered_total` | number | Payloads queued since boot |
+| `dropped_total` | number | Payloads overwritten before they could be sent |
+| `rpc_handled` | number | Server-to-device commands accepted |
+| `publish_interval_ms` | number | Current telemetry cadence, settable by RPC |
+
+### Server-to-device RPC methods
+
+| Method | Params | Returns |
+|---|---|---|
+| `getStatus` | none | Liveness, counters, queue depth, interval, channel |
+| `setPublishInterval` | milliseconds (2000–300000) | `{"ok":true,...}` or a rejection with the valid range |
+| `resetCounters` | none | `{"ok":true,"reset":true}` |

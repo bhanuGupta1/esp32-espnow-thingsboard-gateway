@@ -63,6 +63,31 @@ static const uint32_t WIFI_BOOT_TIMEOUT_MS   = 30000;
 static const uint16_t MQTT_PORT  = 1883;
 static const char    *MQTT_TOPIC = "v1/devices/me/telemetry";
 
+// Server-to-device RPC. ThingsBoard publishes a command to
+// v1/devices/me/rpc/request/<id> and expects the reply on
+// v1/devices/me/rpc/response/<id>. Subscribing with a wildcard on the id is
+// what makes the link bidirectional rather than telemetry-only.
+static const char    *RPC_REQUEST_TOPIC = "v1/devices/me/rpc/request/+";
+static const char    *RPC_RESPONSE_BASE = "v1/devices/me/rpc/response/";
+
+// Publish interval is a runtime value rather than a constant, because the
+// setPublishInterval RPC changes it from the dashboard. Bounds exist so a
+// mistyped command cannot stop telemetry altogether or flood the broker.
+static const uint32_t PUBLISH_INTERVAL_MIN_MS = 2000;
+static const uint32_t PUBLISH_INTERVAL_MAX_MS = 300000;
+
+// Store-and-forward buffer.
+//
+// Without this, telemetry generated while the broker is unreachable is simply
+// discarded: the report previously listed that as a limitation. The buffer is
+// a fixed-size ring in RAM, so a long outage still loses the oldest samples,
+// but a short one - a Wi-Fi reconnect, a broker hiccup - now costs nothing.
+// Flash-backed storage would survive a reboot as well; RAM was chosen because
+// the failure this actually addresses is transient loss of connectivity, not
+// power loss.
+static const size_t   BUFFER_SLOTS      = 12;   // 12 x 10 s = 2 minutes of outage
+static const size_t   BUFFER_SLOT_BYTES = 288;
+
 // Plausibility bounds for incoming sensor values. Deliberately wider than the
 // DHT11's own rated range so a cold room or a dry day is not rejected as
 // corrupt. Tighten these if you want stricter validation.
@@ -173,12 +198,28 @@ static bool  localOk       = false;
 static float localT        = 0.0f;
 static float localH        = 0.0f;
 
-// Scheduling.
+// Scheduling. publishIntervalMs is not const - the setPublishInterval RPC
+// rewrites it at runtime.
+static uint32_t publishIntervalMs = PUBLISH_INTERVAL_MS;
 static uint32_t lastLocalReadMs = 0;
 static uint32_t lastPublishMs   = 0;
 static uint32_t lastWifiTryMs   = 0;
 static uint32_t lastMqttTryMs   = 0;
 static bool     wasWifiUp       = false;
+
+// Store-and-forward ring. head is the next slot to write; count is how many
+// slots hold unsent payloads. When the ring is full the oldest entry is
+// overwritten, which is the right trade for telemetry: recent readings matter
+// more than old ones, and a bounded buffer cannot exhaust memory.
+static char     bufferSlots[BUFFER_SLOTS][BUFFER_SLOT_BYTES];
+static size_t   bufferHead    = 0;
+static size_t   bufferCount   = 0;
+static uint32_t bufferedTotal = 0;  // lifetime count, published as telemetry
+static uint32_t droppedTotal  = 0;  // overwritten before they could be sent
+
+// RPC counters, published so the dashboard can show the link is bidirectional.
+static uint32_t rpcHandledCount = 0;
+static uint32_t rpcRejectedCount = 0;
 
 // ---------------------------------------------------------------------------
 // Duplicate detection state
@@ -582,8 +623,146 @@ static void ensureWifi() {
 }
 
 // ===========================================================================
+// Store-and-forward buffer
+// ===========================================================================
+
+// Queue a payload that could not be sent. Oldest is overwritten when full.
+static void bufferPayload(const char *payload) {
+  size_t len = strlen(payload);
+  if (len >= BUFFER_SLOT_BYTES) {
+    return;  // cannot store it; buildPayload already bounds this in practice
+  }
+  if (bufferCount == BUFFER_SLOTS) {
+    // Ring is full: the slot about to be written still holds an unsent
+    // payload, so record it as dropped rather than losing it silently.
+    droppedTotal++;
+    bufferCount--;
+  }
+  memcpy(bufferSlots[bufferHead], payload, len + 1);
+  bufferHead = (bufferHead + 1) % BUFFER_SLOTS;
+  bufferCount++;
+  bufferedTotal++;
+}
+
+// Send everything queued, oldest first. Called once the broker is reachable.
+// Stops at the first failure so ordering is preserved and nothing is lost.
+static void flushBuffer() {
+  if (bufferCount == 0 || !mqtt.connected()) {
+    return;
+  }
+  Serial.printf("[GATEWAY] flushing %u buffered payload(s)\n", (unsigned)bufferCount);
+  while (bufferCount > 0) {
+    size_t tail = (bufferHead + BUFFER_SLOTS - bufferCount) % BUFFER_SLOTS;
+    if (!mqtt.publish(MQTT_TOPIC, bufferSlots[tail])) {
+      Serial.println("[GATEWAY] flush interrupted, remainder stays queued");
+      return;
+    }
+    bufferCount--;
+  }
+  Serial.println("[GATEWAY] buffer empty");
+}
+
+// ===========================================================================
 // MQTT
 // ===========================================================================
+
+// Server-to-device RPC.
+//
+// ThingsBoard sends {"method":"<name>","params":<value>} to
+// v1/devices/me/rpc/request/<id>, and a reply on the matching response topic
+// is echoed back to whatever triggered it. This makes the device controllable
+// from the dashboard rather than only observable, which is the difference
+// between telemetry and management.
+//
+// Runs on the PubSubClient callback, which PubSubClient invokes from
+// mqtt.loop() on the Arduino task - so ordinary code is safe here, unlike the
+// ESP-NOW receive callback.
+static void onMqttMessage(char *topic, byte *payload, unsigned int length) {
+  char body[192];
+  size_t n = length < sizeof(body) - 1 ? length : sizeof(body) - 1;
+  memcpy(body, payload, n);
+  body[n] = '\0';
+
+  // The request id is the last path segment; the reply must carry it back.
+  const char *idStr = strrchr(topic, '/');
+  idStr = idStr ? idStr + 1 : "0";
+
+  char respTopic[64];
+  snprintf(respTopic, sizeof(respTopic), "%s%s", RPC_RESPONSE_BASE, idStr);
+
+  Serial.printf("[GATEWAY] RPC request id=%s: %s\n", idStr, body);
+
+  char reply[160];
+
+  if (strstr(body, "\"getStatus\"") != nullptr) {
+    uint32_t ageMs = 0;
+    bool online = false;
+    node1Liveness(ageMs, online);
+    snprintf(reply, sizeof(reply),
+             "{\"node1_online\":%s,\"received\":%lu,\"duplicates\":%lu,"
+             "\"buffered\":%u,\"publish_interval_ms\":%lu,\"channel\":%u}",
+             online ? "true" : "false",
+             (unsigned long)espnowReceivedCount,
+             (unsigned long)duplicateCount,
+             (unsigned)bufferCount,
+             (unsigned long)publishIntervalMs,
+             espnowChannel);
+    rpcHandledCount++;
+
+  } else if (strstr(body, "\"setPublishInterval\"") != nullptr) {
+    // params is a bare number here, e.g. {"method":"setPublishInterval",
+    // "params":5000}. Advance past the key and its colon to the first digit or
+    // sign, then parse. A full JSON parser would be overkill for three fixed
+    // commands, but the range check below is what actually makes this safe -
+    // it is applied to whatever was parsed, including 0 when nothing was.
+    long requested = 0;
+    const char *p = strstr(body, "\"params\"");
+    if (p != nullptr) {
+      const char *q = p + strlen("\"params\"");
+      while (*q != '\0' && *q != '-' && (*q < '0' || *q > '9')) {
+        q++;
+      }
+      requested = strtol(q, nullptr, 10);
+    }
+
+    if (requested >= (long)PUBLISH_INTERVAL_MIN_MS &&
+        requested <= (long)PUBLISH_INTERVAL_MAX_MS) {
+      publishIntervalMs = (uint32_t)requested;
+      snprintf(reply, sizeof(reply),
+               "{\"ok\":true,\"publish_interval_ms\":%lu}",
+               (unsigned long)publishIntervalMs);
+      Serial.printf("[GATEWAY] publish interval now %lu ms\n",
+                    (unsigned long)publishIntervalMs);
+      rpcHandledCount++;
+    } else {
+      // Reject out-of-range rather than clamping: silently accepting a value
+      // the caller did not ask for is worse than telling them it was refused.
+      snprintf(reply, sizeof(reply),
+               "{\"ok\":false,\"error\":\"out of range\",\"min\":%lu,\"max\":%lu}",
+               (unsigned long)PUBLISH_INTERVAL_MIN_MS,
+               (unsigned long)PUBLISH_INTERVAL_MAX_MS);
+      Serial.printf("[GATEWAY] RPC rejected: %ld ms out of range\n", requested);
+      rpcRejectedCount++;
+    }
+
+  } else if (strstr(body, "\"resetCounters\"") != nullptr) {
+    espnowReceivedCount = 0;
+    duplicateCount      = 0;
+    rxInvalidCount      = 0;
+    rxUnknownSenderCount = 0;
+    droppedTotal        = 0;
+    snprintf(reply, sizeof(reply), "{\"ok\":true,\"reset\":true}");
+    Serial.println("[GATEWAY] counters reset by RPC");
+    rpcHandledCount++;
+
+  } else {
+    snprintf(reply, sizeof(reply),
+             "{\"ok\":false,\"error\":\"unknown method\"}");
+    rpcRejectedCount++;
+  }
+
+  mqtt.publish(respTopic, reply);
+}
 
 static void buildMqttClientId() {
   uint8_t mac[6] = {0};
@@ -604,6 +783,8 @@ static void setupMqtt() {
   if (!mqtt.setBufferSize(512)) {
     Serial.println("[GATEWAY] WARNING setBufferSize(512) failed, telemetry may be dropped");
   }
+
+  mqtt.setCallback(onMqttMessage);
 
   Serial.printf("[GATEWAY] MQTT target %s:%u topic %s client_id %s\n",
                 MQTT_HOST, MQTT_PORT, MQTT_TOPIC, mqttClientId);
@@ -627,6 +808,15 @@ static void ensureMqtt() {
   // password. There is no separate device identity beyond the token.
   if (mqtt.connect(mqttClientId, THINGSBOARD_ACCESS_TOKEN, "")) {
     Serial.println("[GATEWAY] MQTT connected");
+    // Subscribe on every connect, not once at startup: the broker discards
+    // subscriptions when the session ends, so a reconnect without this leaves
+    // the device publishing normally while silently ignoring every command.
+    if (mqtt.subscribe(RPC_REQUEST_TOPIC)) {
+      Serial.printf("[GATEWAY] subscribed to %s\n", RPC_REQUEST_TOPIC);
+    } else {
+      Serial.println("[GATEWAY] WARNING RPC subscribe failed - commands will be ignored");
+    }
+    flushBuffer();
     return;
   }
 
@@ -751,15 +941,27 @@ static int buildPayload(char *buf, size_t bufLen) {
                      online ? "true" : "false");
 
   ok = ok && appendf(buf, bufLen, n,
-                     "\"duplicate_count\":%lu,\"espnow_received_count\":%lu}",
+                     "\"duplicate_count\":%lu,\"espnow_received_count\":%lu,",
                      (unsigned long)duplicateCount,
                      (unsigned long)espnowReceivedCount);
+
+  // Operational metrics travel through the same pipeline as the data they
+  // describe, so the dashboard can distinguish "the sensor reads 21 C" from
+  // "nothing has arrived for 40 seconds and four frames were rejected".
+  ok = ok && appendf(buf, bufLen, n,
+                     "\"buffered_now\":%u,\"buffered_total\":%lu,\"dropped_total\":%lu,"
+                     "\"rpc_handled\":%lu,\"publish_interval_ms\":%lu}",
+                     (unsigned)bufferCount,
+                     (unsigned long)bufferedTotal,
+                     (unsigned long)droppedTotal,
+                     (unsigned long)rpcHandledCount,
+                     (unsigned long)publishIntervalMs);
 
   return ok ? n : -1;
 }
 
 static void publishTelemetry() {
-  if (millis() - lastPublishMs < PUBLISH_INTERVAL_MS) {
+  if (millis() - lastPublishMs < publishIntervalMs) {
     return;
   }
   lastPublishMs = millis();
@@ -776,24 +978,36 @@ static void publishTelemetry() {
   node1Liveness(ageMs, online);
 
   Serial.printf("[GATEWAY] local_ok=%s  node1_online=%s  node1_age=%lu ms  "
-                "received=%lu  duplicates=%lu  invalid=%lu  wrong_sender=%lu\n",
+                "received=%lu  duplicates=%lu  invalid=%lu  wrong_sender=%lu  buffered=%u\n",
                 localOk ? "yes" : "no",
                 online ? "yes" : "no",
                 (unsigned long)ageMs,
                 (unsigned long)espnowReceivedCount,
                 (unsigned long)duplicateCount,
                 (unsigned long)rxInvalidCount.load(),
-                (unsigned long)rxUnknownSenderCount.load());
+                (unsigned long)rxUnknownSenderCount.load(),
+                (unsigned)bufferCount);
 
+  // Queue rather than discard when the broker is unreachable. This is the
+  // difference between an outage costing nothing and an outage costing every
+  // reading taken during it.
   if (!mqtt.connected()) {
-    Serial.printf("[GATEWAY] MQTT offline, payload not sent: %s\n", payload);
+    bufferPayload(payload);
+    Serial.printf("[GATEWAY] MQTT offline, payload buffered (%u queued): %s\n",
+                  (unsigned)bufferCount, payload);
     return;
   }
+
+  // Drain anything queued before sending the current reading, so the cloud
+  // receives them in the order they were taken.
+  flushBuffer();
 
   if (mqtt.publish(MQTT_TOPIC, payload)) {
     Serial.printf("[GATEWAY] MQTT published %d bytes: %s\n", len, payload);
   } else {
-    Serial.printf("[GATEWAY] MQTT publish FAILED (state=%d): %s\n", mqtt.state(), payload);
+    bufferPayload(payload);
+    Serial.printf("[GATEWAY] MQTT publish FAILED (state=%d), buffered: %s\n",
+                  mqtt.state(), payload);
   }
 }
 
