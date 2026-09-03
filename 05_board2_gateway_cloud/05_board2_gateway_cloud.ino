@@ -85,8 +85,15 @@ static const uint32_t PUBLISH_INTERVAL_MAX_MS = 300000;
 // Flash-backed storage would survive a reboot as well; RAM was chosen because
 // the failure this actually addresses is transient loss of connectivity, not
 // power loss.
+// Slot size must match the payload buffer in publishTelemetry(). It was
+// originally set to 288 bytes, sized against a payload that predated the RPC
+// and buffering telemetry keys. Once those keys were added the payload reached
+// 326 bytes, every slot write hit the size guard, and the buffer silently held
+// nothing - the log said "payload buffered" while reporting a queue depth of
+// zero. Deriving the two from one constant means they cannot drift apart again.
 static const size_t   BUFFER_SLOTS      = 12;   // 12 x 10 s = 2 minutes of outage
-static const size_t   BUFFER_SLOT_BYTES = 288;
+static const size_t   PAYLOAD_BYTES     = 512;
+static const size_t   BUFFER_SLOT_BYTES = PAYLOAD_BYTES;
 
 // Plausibility bounds for incoming sensor values. Deliberately wider than the
 // DHT11's own rated range so a cold room or a dry day is not rejected as
@@ -630,7 +637,14 @@ static void ensureWifi() {
 static void bufferPayload(const char *payload) {
   size_t len = strlen(payload);
   if (len >= BUFFER_SLOT_BYTES) {
-    return;  // cannot store it; buildPayload already bounds this in practice
+    // Should be unreachable: slots are the same size as the payload buffer.
+    // Say so rather than returning quietly - a silent return here is exactly
+    // how the original 288-byte slots hid the fact that nothing was ever
+    // being stored.
+    droppedTotal++;
+    Serial.printf("[GATEWAY] BUG payload %u bytes exceeds %u byte slot, dropped\n",
+                  (unsigned)len, (unsigned)BUFFER_SLOT_BYTES);
+    return;
   }
   if (bufferCount == BUFFER_SLOTS) {
     // Ring is full: the slot about to be written still holds an unsent
@@ -966,7 +980,7 @@ static void publishTelemetry() {
   }
   lastPublishMs = millis();
 
-  char payload[512];
+  char payload[PAYLOAD_BYTES];
   int  len = buildPayload(payload, sizeof(payload));
   if (len < 0) {
     Serial.println("[GATEWAY] payload build failed (would have been truncated), skipping publish");
@@ -992,9 +1006,18 @@ static void publishTelemetry() {
   // difference between an outage costing nothing and an outage costing every
   // reading taken during it.
   if (!mqtt.connected()) {
+    size_t before = bufferCount;
     bufferPayload(payload);
-    Serial.printf("[GATEWAY] MQTT offline, payload buffered (%u queued): %s\n",
-                  (unsigned)bufferCount, payload);
+    // Report the depth after the write, and say plainly when the write did not
+    // happen. The earlier version printed the count from before the call, so a
+    // buffer that was storing nothing still logged "payload buffered".
+    if (bufferCount > before) {
+      Serial.printf("[GATEWAY] MQTT offline, payload buffered (%u queued)\n",
+                    (unsigned)bufferCount);
+    } else {
+      Serial.printf("[GATEWAY] MQTT offline, buffer full - oldest dropped (%u queued)\n",
+                    (unsigned)bufferCount);
+    }
     return;
   }
 
