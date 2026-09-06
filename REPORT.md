@@ -36,6 +36,34 @@ What the system does demonstrate:
 | Duplicate detection | `(src_id, boot_id, seq)` key with a rejection counter |
 | Liveness detection | `node1_online` flips false 20 s after the last valid packet |
 
+### 1.1 Relationship to the Case Study Analysis
+
+Part 1 of this assessment analysed the proposed system before it was built. This portfolio
+reports what was built, and the two align on every substantive point.
+
+| Case Study Analysis proposed | This implementation delivers |
+|---|---|
+| Two ESP32 boards, one sensing node and one edge gateway | Board 1 (`44:1D:64:F5:FA:24`) and Board 2 (`44:1D:64:F4:F1:C8`), §2 |
+| Three-tier arrangement: node, edge gateway, cloud | §4, with the gateway merging before anything leaves the network |
+| ESP-NOW on the local leg, MQTT to the cloud | §5 and §7.5; 26-byte frames, JSON telemetry on port 1883 |
+| Channel discovered at runtime, not chosen | §4.2; the gateway reports the channel it landed on, and the node is pinned to match |
+| Edge aggregation to reduce cloud traffic | Two 26-byte frames every 5 s become one publish every 10 s, §8.3 |
+| Deduplication on `(src_id, boot_id, seq)` | §6, with a node restart correctly distinguished from a replay |
+| Link encryption with a pre-shared key pair | §7.9.3; PMK plus per-peer LMK, verified on hardware |
+| ThingsBoard PaaS for registry, ingestion and dashboards | §7.5 and §8.9 |
+
+Two differences are worth stating plainly rather than leaving for a reader to notice.
+
+**The sensor changed.** The brief specified BMP280; the available hardware was DHT11. This
+alters what the system measures — humidity instead of pressure — but not the architecture being
+demonstrated. §3 sets out the substitution and its consequences in full.
+
+**The implementation went further than the analysis.** The case study closed by recommending
+work on the cloud leg. Two capabilities were added afterwards that it does not describe:
+server-to-device RPC, so the cloud can change device behaviour rather than only observe it,
+and a store-and-forward buffer that preserves telemetry across a broker outage. Both are
+specified in §7.6 and verified on hardware in §8.8.
+
 ---
 
 ## 2. Hardware
@@ -1101,6 +1129,21 @@ during testing, several of them did precisely that.
 
 > **[Both members]** Adjust the emphasis above to match your own experience, and add a
 > sentence each on what you personally took from the project.
+
+---
+
+## Video evidence
+
+The demonstration recordings are hosted on OneDrive. Both links are view-accessible without a
+sign-in.
+
+| Recording | Length | Contents | Link |
+|---|---|---|---|
+| System demonstration | ~6 min | Both boards powered, serial output from each, live telemetry reaching ThingsBoard, a dashboard command changing device behaviour, and the node going stale and recovering | *[paste OneDrive share link]* |
+| Presentation | ~10 min | Slide walkthrough against the marking domains, followed by the live demonstration | *[paste OneDrive share link]* |
+
+`DEMO_PLAN.md` in the repository carries the runsheet these recordings follow, including the
+pre-flight checks and the intended order of the six demonstration steps.
 
 ---
 
