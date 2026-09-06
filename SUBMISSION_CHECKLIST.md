@@ -95,26 +95,46 @@ the single largest remaining gap.
 
 The brief says video may be uploaded to OneDrive with the link placed in the portfolio.
 
-**Suggested shot list — about 4 minutes total.** Recording it on a phone is fine; clear audio
-matters more than image quality.
+**Before you press record.** Both boards powered, and confirm the link is up — if
+`espnow_received_count` is not climbing, the gateway has roamed and the node needs repinning
+(see `DEMO_PLAN.md`). Identify the ports by MAC, not by number: Board 1 is
+`44:1D:64:F5:FA:24`, Board 2 is `44:1D:64:F4:F1:C8`.
+
+```
+.\build.ps1 -Monitor -NoReset -Port <gateway> -Seconds 20
+```
+
+Use `-NoReset` throughout. Without it the board reboots when the monitor attaches, and the
+boot banner prints your eduroam identity on screen.
+
+**Shot list — about 5 minutes.** Phone camera is fine; clear audio matters more than image
+quality. Screen-record the dashboard and terminal separately if that is easier than filming a
+monitor.
 
 | # | Length | Shot | Say |
 |---|---|---|---|
 | 1 | 20 s | Both boards on the desk, pan slowly between them | "Two boards, powered separately, no wire between them." |
 | 2 | 20 s | Close on each breadboard | Wire colours, which GPIO, that the board straddles the centre gap |
-| 3 | 40 s | Board 1 serial output | Point out `association: none`, and `send : OK` being a real link-layer ack |
-| 4 | 40 s | Board 2 serial output | The same packet arriving, validated, deduplicated |
+| 3 | 40 s | Board 1 serial | `association: none`, and `send : OK` being a real link-layer ack, not an assumption |
+| 4 | 40 s | Board 2 serial | The same sequence number arriving, validated, `invalid=0 wrong_sender=0` |
 | 5 | 30 s | ThingsBoard dashboard | Same numbers, both traces on one chart |
-| 6 | 45 s | **Warm Board 1's sensor by hand** | Watch the value climb on the dashboard, then release and watch it fall |
-| 7 | 40 s | Unplug Board 1, wait | `node1_online` goes false after 20 s; last value still published |
-| 8 | 30 s | Plug back in | New `boot_id`, sequence restarts, accepted with no duplicate flood |
+| 6 | 45 s | **Warm Board 1's sensor by hand** | Watch it climb on the dashboard, release, watch it fall |
+| 7 | 45 s | **Press "Fast publish (2 s)"** | The cloud talking back — then show `rpc_handled` and `publish_interval_ms` change in Latest Telemetry |
+| 8 | 40 s | Unplug Board 1, wait | `node1_online` false after 20 s; last value still published |
+| 9 | 30 s | Plug back in | New `boot_id`, sequence restarts, accepted with no duplicate flood |
 
-Shot 6 is the one worth getting right. It demonstrates the entire chain — sensor, radio,
-gateway, MQTT, cloud — responding to a physical action, in about fifteen seconds.
+Shots 6 and 7 are the two to get right, and they show opposite directions. Shot 6 proves the
+whole upward chain — sensor, radio, gateway, MQTT, cloud — responding to a physical action in
+about fifteen seconds. Shot 7 proves the downward one, which is what separates a managed
+device from a telemetry feed. Say the interval out loud before and after so the change is
+audible as well as visible.
+
+If the buffer is worth showing, unplug the gateway's network rather than the board: payloads
+accumulate in `buffered_now` and flush on reconnect with `dropped_total` still zero.
 
 **Before uploading:** check no frame shows `secrets.h`, a password field, or your eduroam
-username. Shot 3 and 4 show serial output, which includes the outer identity line on the
-gateway's boot banner.
+username. Shots 3, 4 and 7 show serial output, and the gateway's boot banner carries the outer
+identity line — which is why `-NoReset` matters above.
 
 ---
 
