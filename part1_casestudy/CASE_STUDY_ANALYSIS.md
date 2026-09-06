@@ -387,10 +387,12 @@ the main loop performed a read-print-reset could silently lose increments. The r
 ### 5.2 Security risks
 
 Assessed against the OWASP IoT Top 10 (OWASP Foundation, 2018), the deployment carries four
-material risks: **lack of transport encryption** on both the radio and cloud legs; **insecure
-network services**, in that the gateway accepts frames from unauthenticated senders;
-**insecure data storage**, with credentials in flash recoverable over USB; and **insufficient
-privacy protection**, since telemetry is readable in transit.
+material risks. **Lack of transport encryption** now applies to the cloud leg only: the radio
+leg is encrypted, but MQTT runs on port 1883 without TLS. **Insecure data storage**, with
+credentials in flash recoverable over USB. **Insufficient privacy protection**, since telemetry
+is readable in transit to the broker. And **insecure network services**, in that the RADIUS
+server certificate is not validated, so the gateway will authenticate to any access point
+advertising the target SSID.
 
 The highest-severity finding is the availability attack described in §2.4, in which the
 deduplication mechanism can be turned against the system by an unauthenticated sender. It is
@@ -446,14 +448,13 @@ reflashing does not scale.
 
 **Security enhancements**, in priority order:
 
-1. Enable ESP-NOW encryption with a primary master key and per-peer local master keys. This
-   addresses confidentiality and sender authentication together, and closes the availability
-   attack in §2.4.
-2. Move MQTT to TLS on port 8883, removing clear-text transmission of the access token.
-3. Provision credentials into NVS at first boot rather than compiling them into the image.
-4. Ship the institutional CA certificate so the RADIUS server is validated during enterprise
+1. Move MQTT to TLS on port 8883, removing clear-text transmission of the access token. This
+   is now the highest-severity remaining exposure, the radio leg having been closed by
+   encryption (§2.4).
+2. Provision credentials into NVS at first boot rather than compiling them into the image.
+3. Ship the institutional CA certificate so the RADIUS server is validated during enterprise
    authentication.
-5. Add per-device rate limiting at the gateway, so a compromised or faulty node cannot
+4. Add per-device rate limiting at the gateway, so a compromised or faulty node cannot
    exhaust the cloud message quota.
 
 **Scalability solutions.** Convert the deduplication state to an array indexed by source
@@ -707,7 +708,7 @@ review.
 | Sensor | DHT11: 0–50 °C ±2 °C, 20–90 % RH ±5 %, 1 Hz maximum sample rate |
 | Node sensor pin | GPIO4 |
 | Gateway sensor pin | GPIO5 |
-| Local protocol | ESP-NOW, unicast, unencrypted, 26-byte payload |
+| Local protocol | ESP-NOW, unicast, encrypted (PMK + per-peer LMK), 26-byte payload |
 | Transmission interval | 5 s |
 | Cloud protocol | MQTT 3.1.1, QoS 0, port 1883 |
 | Publication interval | 10 s |
