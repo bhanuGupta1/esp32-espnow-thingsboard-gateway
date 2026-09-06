@@ -608,13 +608,14 @@ distribution.
 
 #### 7.9.3 The sender-authentication problem
 
-This is worth setting out in full, because it is the most instructive weakness in the design.
+This is worth setting out in full, because the reasoning that led away from the original
+design is the most instructive part of the project.
 
-The gateway deliberately registers no ESP-NOW peers and uses no encryption, because that is
-what allows it to accept frames without a prior handshake. The consequence is that the
-`src_id` field inside the packet is *a claim by the sender, not evidence of identity*. Any
-ESP-NOW device in radio range could transmit a well-formed 26-byte packet asserting
-`src_id = 1`, and every validation check listed above would pass.
+That first version registered no ESP-NOW peers and used no encryption, because that is what
+allows a receiver to accept frames without a prior handshake. The consequence was that the
+`src_id` field inside the packet was *a claim by the sender, not evidence of identity*. Any
+ESP-NOW device in radio range could transmit a well-formed 26-byte packet asserting `src_id = 1`, and every
+validation check listed above would pass.
 
 The damaging case is not a wrong temperature on the dashboard. An injected packet carrying a
 very high sequence number under the currently live `boot_id` would advance the deduplication

@@ -11,6 +11,11 @@ be able to defend the design choices behind it.
 **The night before**
 
 - [ ] Both boards flashed with final firmware (sketch 04 on Board 1, sketch 05 on Board 2)
+- [ ] **Identify each board by MAC, not by COM port.** Windows reassigns port numbers when a
+      cable is reseated or a board is replugged, and the two ESP32s look identical to it. The
+      upload prints the MAC it is talking to — Board 1 is `44:1D:64:F5:FA:24`, Board 2 is
+      `44:1D:64:F4:F1:C8`. Check that line before letting an upload finish. Flashing the wrong
+      image onto the wrong board is silent: the gateway simply stops gatewaying.
 - [ ] `SEND_DUPLICATE_FOR_DEMO` is `0` in sketch 04 — you will flip it live, see Act 4
 - [ ] ThingsBoard dashboard open in a browser tab, logged in
 - [ ] Serial monitors ready for both COM ports
@@ -19,7 +24,8 @@ be able to defend the design choices behind it.
 **In the room, 5 minutes before**
 
 - [ ] Power both boards
-- [ ] Run the channel check:
+- [ ] Run the channel check on whichever port is the **gateway** — confirm from its banner,
+      which prints `station MAC = 44:1D:64:F4:F1:C8`:
       `.\build.ps1 -Monitor -NoReset -Port COM4 -Seconds 15`
 - [ ] `espnow_received_count` climbing → good. Frozen → the gateway landed on a different
       eduroam access point. Read the channel from the boot banner, put it in sketch 04,
@@ -129,18 +135,34 @@ ThingsBoard dashboard. Both temperature traces on one chart.
 > arrive as a single cloud stream because the gateway merges them at the edge — before the
 > data ever leaves the local network."
 
-Show the device page: State = **Active**, and Latest Telemetry with all ten keys.
+Show the device page: State = **Active**, and Latest Telemetry with all sixteen keys.
+
+Then press **Fast publish (2 s)** on the dashboard and let them watch the cadence change.
+
+> "Everything so far has been the device talking to the cloud. This is the cloud talking back.
+> That button sends an RPC over MQTT, the gateway applies it, and the new interval comes back
+> in the next telemetry message — so you are seeing the round trip, not just the request."
+
+Press **Normal publish (10 s)** to put it back. If asked what stops a bad value: the firmware
+range-checks and *rejects* rather than clamping, because silently applying something other than
+what was asked for would leave the operator believing something untrue about the device.
 
 ### Act 6 — Limits and close (1 min)
 
 Name your own limitations before anyone asks. Pick three:
 
 - One hop only — cannot demonstrate multi-hop with two radios
-- Unencrypted ESP-NOW, plain MQTT on 1883, token crosses the network in clear text
-- Credentials compiled into firmware, recoverable over USB
+- Manual channel pinning — the access point dictates the gateway's channel, and the node must
+  be told it by hand. This broke the link twice during development.
+- Plain MQTT on 1883, so the access token crosses the network in clear text; credentials are
+  compiled into firmware and recoverable over USB
 
-> "Next steps would be a third node to actually exercise the TTL field, encrypted ESP-NOW,
-> TLS MQTT on 8883, and credentials provisioned into NVS at first boot rather than compiled in."
+> "Next steps would be a third node to actually exercise the TTL field, TLS MQTT on 8883,
+> credentials provisioned into NVS at first boot rather than compiled in, and a node that scans
+> for the gateway instead of being pinned to a hard-coded channel."
+
+Do **not** list ESP-NOW encryption as a limitation — it is implemented, with a primary master
+key and a per-peer local key, and the receiver authenticates the sender by MAC.
 
 ---
 
@@ -170,12 +192,21 @@ deliberately. A forward jump is treated as a gap, not a duplicate — a receiver
 contiguous sequence numbers would deadlock after the first lost packet.
 
 **"Is it secure?"** — *expect this one; Security is 25 marks*
-Honestly: not for deployment. ESP-NOW is unencrypted, so anyone with an SDR in range can read
-the readings and could inject packets that pass validation. MQTT is on 1883, so the access
-token crosses in clear text. Credentials are compiled into flash and recoverable over USB.
-What *is* in place: strict packet validation (length, version, type, addressing, range checks),
-and deduplication that rejects replayed packets. Production would need ESP-NOW PMK/LMK
-encryption, TLS on 8883, and NVS-provisioned credentials.
+Partly, and the interesting part is which half. **The radio link is encrypted and
+authenticated**: a 16-byte primary master key plus a per-peer local master key, so the gateway
+accepts a frame because it decrypted under a key the sender must hold, not because of an
+address the sender chose. Also in place: strict packet validation and replay rejection.
+
+Not defended: MQTT is on 1883, so the access token crosses in clear text — that is the most
+serious practical weakness. The RADIUS server certificate is not validated, so a rogue AP could
+harvest the institutional credentials. And credentials are compiled into flash, recoverable
+over USB. Production would need TLS on 8883, a pinned CA certificate, and NVS provisioning.
+
+*If they push on the encryption — this is the strongest answer in the deck:* the first version
+had no encryption. The fix I first wrote was a source-MAC filter, and an adversarial review
+rejected it, correctly: 802.11 source addresses are forgeable by anyone already able to inject
+frames, so I was filtering on a value the attacker controls. That is an identifier, not an
+authenticator. Encryption is what actually moved the trust boundary.
 
 **"Why DHT11 and not the BMP280 in the brief?"**
 Documented substitution — that hardware was not available. We measure temperature and

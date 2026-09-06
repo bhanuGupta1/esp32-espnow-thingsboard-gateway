@@ -69,28 +69,42 @@ and observability, and it is worth one sentence in §7 of the portfolio.
 The gateway subscribes to `v1/devices/me/rpc/request/+` and implements three methods. Adding
 control widgets proves the link is bidirectional.
 
-**Open your dashboard → Edit → Add widget → Control widgets**
+**Open your dashboard → Edit mode → Add widget → search "button" → Buttons bundle →
+Command button.**
 
-### Widget 1 — Update Server Attribute / RPC button: `getStatus`
+On ThingsBoard 4.3.1 the widget you want is called **Command button** and lives in the
+**Buttons** bundle. Older guides call it "RPC button" under "Control widgets"; that name no
+longer appears in the widget picker. Each button then needs, in the Basic tab:
+
+| Field | Where | Value |
+|---|---|---|
+| Target device | top of the dialog | `P1 Gateway` |
+| On click | Behavior → pencil icon | Action **Execute RPC**, then set Method |
+| Label | Appearance | whatever the button should read |
+
+**One trap worth knowing.** Under *Parameters*, the type defaults to **Boolean**. The firmware
+finds `"params"` and scans forward to the first digit or sign, so a Boolean `true` parses as
+`0` and the command is **rejected** by the range check. Set the type to **Integer** for
+`setPublishInterval`. Methods that take no argument can be left as **None**.
+
+### Widget 1 — `getStatus`
 
 | Field | Value |
 |---|---|
-| Widget | **RPC button** (Control widgets bundle) |
-| Target device | `P1 Gateway` |
 | Method | `getStatus` |
-| Params | *(leave empty)* |
+| Parameters | *None* |
 
 Returns liveness, counters, queue depth, current interval and radio channel. Useful in the
 demo because it proves the device answers, not just speaks.
 
-### Widget 2 — RPC button: `setPublishInterval`
+### Widget 2 — `setPublishInterval`
 
 Create two buttons rather than a text field — faster and less error-prone to demonstrate.
 
-| Button | Method | Params |
+| Button label | Method | Parameters (Integer) |
 |---|---|---|
-| "Fast (2 s)" | `setPublishInterval` | `2000` |
-| "Normal (10 s)" | `setPublishInterval` | `10000` |
+| "Fast publish (2 s)" | `setPublishInterval` | `2000` |
+| "Normal publish (10 s)" | `setPublishInterval` | `10000` |
 
 Press "Fast" during the demo and the telemetry cadence visibly changes on the chart within
 seconds. That is the single most convincing thing you can show about cloud control.
@@ -100,12 +114,12 @@ range, because the minimum is 2000 ms. Showing a rejected command is better evid
 thought than showing an accepted one — it proves the device validates input rather than obeying
 blindly.
 
-### Widget 3 — RPC button: `resetCounters`
+### Widget 3 — `resetCounters`
 
 | Field | Value |
 |---|---|
 | Method | `resetCounters` |
-| Params | *(empty)* |
+| Parameters | *None* |
 
 Zeroes the diagnostic counters without a reboot. Handy immediately before the demo so the
 numbers start clean.
@@ -134,11 +148,11 @@ Slots into `DEMO_PLAN.md` between Act 5 (cloud) and Act 6 (limits):
 
 1. Show the dashboard with both temperature traces — the existing content
 2. Press **getStatus** — device replies with live counters
-3. Press **Fast (2 s)** — watch the chart cadence change
+3. Press **Fast publish (2 s)** — watch the chart cadence change
 4. Send `1000` — device **rejects** it, states the valid range
 5. Unplug Board 1 — after 20 s the **alarm raises itself**
 6. Plug it back in — alarm **clears itself**
-7. Press **Normal (10 s)** to restore
+7. Press **Normal publish (10 s)** to restore
 
 Steps 4 and 5 are the strongest. One shows input validation; the other shows the platform
 detecting a fault without a human watching.
@@ -147,11 +161,16 @@ detecting a fault without a human watching.
 
 ## 5. Screenshots to capture for the portfolio
 
-- Alarm rules configuration page
-- Alarm table with `Node offline` **active** (Board 1 unplugged)
-- Same table showing it **cleared** (Board 1 restored)
-- RPC button widgets on the dashboard
-- An RPC response showing a **rejected** `setPublishInterval`
-- Latest telemetry showing the new keys (`buffered_now`, `rpc_handled`, `publish_interval_ms`)
+| Screenshot | Status |
+|---|---|
+| Command buttons on the dashboard | ✅ `dashboard_06_full_system_live.jpg` |
+| Latest telemetry showing `rpc_handled` and the changed `publish_interval_ms` | ✅ `dashboard_05_rpc_publish_interval_2000.jpg` |
+| Latest telemetry showing the live `node1_*` keys | ✅ `dashboard_07_node1_keys_live.jpg` |
+| Alarm rules configuration page | Still to capture |
+| Alarm table with `Node offline` **active** (Board 1 unplugged) | Still to capture |
+| Same table showing it **cleared** (Board 1 restored) | Still to capture |
+| An RPC response showing a **rejected** `setPublishInterval` | Still to capture |
 
-Six screenshots, and they evidence the Cloud domain far better than the telemetry charts alone.
+The three captured ones are already embedded in the report as Figures 9–11. The alarm
+screenshots depend on the alarm rules being configured first (§1), and the rejection
+screenshot needs a `1000` sent from a fourth button or the REST API.

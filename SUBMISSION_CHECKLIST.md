@@ -37,10 +37,10 @@ Two consequences worth checking:
 
 | Deliverable | Status | File |
 |---|---|---|
-| Project portfolio | Ready | `REPORT.docx` (27+ pages, figures embedded) |
+| Project portfolio | Ready | `REPORT.docx` (11 figures, 13 tables, figures embedded) |
 | Presentation / demo materials | Ready | `PRESENTATION.pptx` (16 slides, speaker notes) |
 | Video recordings | **Not done — yours to record** | see §3 |
-| Complementary evidence | Ready | `evidence/` (7 logs, 3 photos, 4 screenshots) |
+| Complementary evidence | Ready | `evidence/` (10 logs, 3 photos, 7 screenshots, 1 diagram) |
 | Cover sheet | **Template below — needs your details** | §2 |
 | Original document, if AI-assisted | **Yours to decide and produce** | §4 |
 | Code | Ready | 5 sketches + private GitHub repo |
