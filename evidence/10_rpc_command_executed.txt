@@ -1,0 +1,13 @@
+Server-to-device RPC executed from the ThingsBoard dashboard, 2026-09-07.
+Captured on the gateway serial port at 115200 baud while the "Fast publish (2 s)"
+and "Normal publish (10 s)" command buttons were pressed on the P1 Gateway Dashboard.
+
+--- steady state after the first command (interval already 2000 ms, rpc_handled=1) ---
+[GATEWAY] MQTT published 241 bytes: {"gateway_temperature":23.4,"gateway_humidity":63.0,"gateway_sensor_ok":true,"node1_online":false,"duplicate_count":0,"espnow_received_count":0,"buffered_now":0,"buffered_total":4,"dropped_total":0,"rpc_handled":1,"publish_interval_ms":2000}
+[GATEWAY] local_ok=yes  node1_online=no  node1_age=0 ms  received=0  duplicates=0  invalid=0  wrong_sender=0  buffered=0
+[GATEWAY] MQTT published 241 bytes: {"gateway_temperature":23.4,"gateway_humidity":63.0,"gateway_sensor_ok":true,"node1_online":false,"duplicate_count":0,"espnow_received_count":0,"buffered_now":0,"buffered_total":4,"dropped_total":0,"rpc_handled":1,"publish_interval_ms":2000}
+[GATEWAY] local_ok=yes  node1_online=no  node1_age=0 ms  received=0  duplicates=0  invalid=0  wrong_sender=0  buffered=0
+
+--- second command arriving and being applied ---
+[GATEWAY] RPC request id=1: {"method":"setPublishInterval","params":10000}
+[GATEWAY] publish interval now 10000 ms

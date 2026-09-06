@@ -73,6 +73,13 @@ No Raspberry Pi, no external LEDs or resistors, and no wired connection between 
 The silkscreen labels `D4` and `D5` correspond to GPIO4 and GPIO5. The Arduino API takes
 the integer pin number, so the code uses `4` and `5` rather than the string labels.
 
+![Pin-level circuit diagram of both boards, each with a DHT11 module, linked only by ESP-NOW](evidence/fig_circuit_diagram.png)
+
+**Figure 1** — Circuit and wiring. The two boards are electrically independent: each has its
+own USB supply and its own ground, and the only path between them is the encrypted ESP-NOW
+link drawn as a dashed line. The wiring is identical on both boards apart from the data pin,
+GPIO4 on Board 1 and GPIO5 on Board 2.
+
 ### 2.3 Safety constraints observed
 
 - Both ESP32 boards straddle the breadboard centre gap, so opposing pin rows are not
@@ -88,18 +95,18 @@ the integer pin number, so the code uses `4` and `5` rather than the string labe
 
 ![Both boards operating simultaneously, separately powered, with no physical connection between them](evidence/photo_01_both_boards_no_wire.jpeg)
 
-**Figure 1** — Both boards operating, each powered from its own USB cable, with no wire
+**Figure 2** — Both boards operating, each powered from its own USB cable, with no wire
 between them. This is the primary evidence that the link is wireless: any data appearing
 on the gateway from the remote node can only have arrived by radio.
 
 ![DHT11 module wiring detail showing green, orange and yellow jumper wires](evidence/photo_02_wiring_detail_dht11.jpeg)
 
-**Figure 2** — Wiring detail. Green to `3V3`, orange to `GND`, yellow to the data pin. The
+**Figure 3** — Wiring detail. Green to `3V3`, orange to `GND`, yellow to the data pin. The
 three-pin DHT11 module carries its own pull-up resistor, so no external component is needed.
 
 ![ESP32 DevKit straddling the breadboard centre gap with pin labels visible](evidence/photo_03_board_on_breadboard.jpeg)
 
-**Figure 3** — The ESP32 straddles the breadboard centre gap so that opposing pin rows are
+**Figure 4** — The ESP32 straddles the breadboard centre gap so that opposing pin rows are
 not shorted together, and the pin labels remain legible for verification.
 
 ---
@@ -729,6 +736,8 @@ connectivity, then the ESP-NOW link. Serial output was captured to file at each 
 | 9 | Logs show node/gateway/ESP-NOW/Wi-Fi/MQTT status | all | ✅ `[NODE]` / `[GATEWAY]` prefixes throughout |
 | 10 | Losing Board 1 sets `node1_online` false | `05_` | ✅ transition at the 20 s threshold |
 | 11 | Restarting Board 1 does not break dedup | `03_`, `04_`, `06_` | ✅ new `boot_id`, sequence rebased, no duplicate flood |
+| 12 | A dashboard command changes device behaviour | `10_`, Figure 9 | ✅ `setPublishInterval` accepted and applied; `rpc_handled` incremented |
+| 13 | Telemetry survives a broker outage | `10_` | ✅ `buffered_total=4`, `dropped_total=0`, `buffered_now=0` — buffered then flushed, none lost |
 
 ### 8.3 Combined payload
 
@@ -804,11 +813,42 @@ from 21.4 °C to 28.9 °C with humidity falling from 48 % to 31 %, then relaxed 
 ambient at a comparable rate once released. Both directions tracked with similar lag,
 confirming the readings are live rather than cached at any point in the chain.
 
-### 8.8 Cloud dashboard
+### 8.8 Bidirectional control
+
+Sections 8.3 to 8.7 test the upward path: sensor to gateway to cloud. This section tests the
+downward one, which is what separates a managed device from a telemetry feed.
+
+Three **RPC command buttons** were added to the dashboard, one per implemented method. Pressing
+*Fast publish (2 s)* and then *Normal publish (10 s)* produced this on the gateway's serial port:
+
+```
+[GATEWAY] RPC request id=1: {"method":"setPublishInterval","params":10000}
+[GATEWAY] publish interval now 10000 ms
+```
+
+The command travels dashboard → ThingsBoard core → `v1/devices/me/rpc/request/<id>` → firmware,
+and the change is then visible in the opposite direction: the next telemetry publish carried
+`"publish_interval_ms":2000` and `"rpc_handled":1`, and the observed publish spacing changed
+accordingly. The round trip is therefore confirmed at both ends rather than assumed from a
+dashboard acknowledgement.
+
+The parameter type matters more than it first appears. The handler locates `"params"` and scans
+forward to the first digit or sign, so a Boolean `true` would parse as `0` and be **refused** by
+the range check rather than silently setting a nonsense cadence. Configuring the widget to send
+an Integer is what makes the command well-formed; the range check is what makes a malformed one
+harmless.
+
+The same capture confirms the store-and-forward path end to end. The gateway reported
+`buffered_total=4` with `buffered_now=0` and `dropped_total=0`: four payloads generated while
+the broker was unreachable were held, and all four were later flushed with none overwritten.
+Section 7.6 argued the design was bounded, ordered and recent-biased; this is the measurement
+that it also works.
+
+### 8.9 Cloud dashboard
 
 ![ThingsBoard time-series chart showing both temperature traces on one axis](evidence/dashboard_01_temperature_both_boards.jpg)
 
-**Figure 4** — Both temperature traces on one axis. Blue is the gateway's local sensor; green
+**Figure 5** — Both temperature traces on one axis. Blue is the gateway's local sensor; green
 is the remote node, arriving via ESP-NOW. This is the clearest single visualisation of edge
 aggregation: two physically separate sensors, one of which has no network connection of its
 own, presented as a single cloud stream. The stepped appearance is DHT11 quantisation
@@ -816,18 +856,39 @@ own, presented as a single cloud stream. The stepped appearance is DHT11 quantis
 
 ![ThingsBoard time-series chart showing both humidity traces](evidence/dashboard_02_humidity_both_boards.jpg)
 
-**Figure 5** — Both humidity traces. The same two sources, second measurand.
+**Figure 6** — Both humidity traces. The same two sources, second measurand.
 
 ![ThingsBoard latest telemetry table listing all ten keys with timestamps](evidence/dashboard_03_latest_telemetry_10_keys.jpg)
 
-**Figure 6** — Latest telemetry, showing all ten published keys with timestamps. Both the
+**Figure 7** — Latest telemetry, showing all ten published keys with timestamps. Both the
 `gateway_*` and `node1_*` families are present in the same update, confirming that the merge
 happens at the edge rather than in the cloud.
 
 ![ThingsBoard device list showing P1 Gateway with State set to Active](evidence/dashboard_04_device_state_active.jpg)
 
-**Figure 7** — The device registered as **Active**. ThingsBoard sets this state only on a live
+**Figure 8** — The device registered as **Active**. ThingsBoard sets this state only on a live
 connection, so the badge is independent confirmation of cloud connectivity.
+
+![ThingsBoard latest telemetry showing publish_interval_ms set to 2000 and rpc_handled at 1](evidence/dashboard_05_rpc_publish_interval_2000.jpg)
+
+**Figure 9** — The result of a dashboard command, read back from the cloud. `publish_interval_ms`
+is 2000 rather than the compiled-in default of 10000, and `rpc_handled` has incremented to 1.
+Because these values are reported *by the device* in its own telemetry, they confirm the command
+was received and applied, not merely that the dashboard sent it.
+
+![P1 Gateway Dashboard with the gateway online, node communication age live and three RPC command buttons](evidence/dashboard_06_full_system_live.jpg)
+
+**Figure 10** — The complete system in operation. The gateway is **Online**, its own sensor reads
+29.8 °C and 47 %, *Node 1 Communication Age* is counting in milliseconds rather than sitting
+stale, no alarms are raised, and the three RPC command buttons are available to an operator.
+This single view covers both directions of the link.
+
+![Latest telemetry filtered to the node1 keys, all timestamped identically with node1_online true](evidence/dashboard_07_node1_keys_live.jpg)
+
+**Figure 11** — The cloud's view of the remote node, filtered to the `node1_*` keys. All five
+share one timestamp and `node1_online` is `true`. These values originate on a board with no
+network connection of its own; they reached the cloud only by ESP-NOW to the gateway and MQTT
+onward, which is the central claim of the project reduced to five rows.
 
 ---
 
@@ -878,6 +939,13 @@ looked healthy.
 The incident was diagnosed from the gateway's own boot banner, which reports the active
 channel on every reconnection, and resolved by updating `ESPNOW_CHANNEL` in the node firmware
 and re-uploading. Recovery took under two minutes but required physical access to the node.
+
+It then recurred. Over a single day the gateway was observed on channels 1, 11 and 6 in turn,
+and on the final occasion the node had been pinned to 6 while the gateway had settled back on
+1 — the same silent failure, reached from the opposite direction. The recurrence is the point:
+this is not a one-off mistake that care prevents, it is a standing property of running ESP-NOW
+alongside a managed enterprise network, and any deployment on eduroam must either automate the
+channel or accept a link that breaks whenever the access point decides it should.
 
 Two lessons follow. First, this is the strongest argument in the project for the diagnostic
 output described in §7.5 — without a gateway that reports its own channel, the failure
