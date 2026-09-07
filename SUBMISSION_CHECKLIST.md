@@ -152,18 +152,28 @@ starting point only, and needs editing to reflect what you actually did.
 ```
 Use of generative AI
 
-Generative AI was used during this project in the following ways:
-    - [ e.g. drafting and structuring portfolio prose ]
-    - [ e.g. code review and identification of defects ]
-    - [ e.g. debugging assistance ]
+Generative AI (Claude) was used substantially during this project, in the
+following ways:
+    - Drafting and structuring the portfolio prose and the case study
+    - Writing and revising firmware, including the ESP-NOW, deduplication,
+      MQTT, RPC and buffering code
+    - Diagnosing faults, including the channel-roam failure and a
+      sender-authentication weakness that was subsequently fixed with
+      link encryption
+    - Generating the circuit diagram and configuring the cloud dashboard
+    - Producing the presentation slides and supporting documentation
 
-The following were carried out without AI assistance:
-    - [ e.g. hardware assembly and wiring ]
-    - [ e.g. all physical testing and evidence capture ]
-    - [ e.g. design decisions and their justification ]
+The following were carried out by the authors without AI assistance:
+    - All hardware assembly, wiring and physical testing
+    - All photographic and video evidence capture
+    - Operating the boards during every test, including the physical
+      interventions that produced the stale-detection and recovery results
+    - Acceptance of the design decisions recorded in this portfolio,
+      including the DHT11 substitution and the deployment choices
 
-All technical claims in this portfolio were verified against captured evidence,
-which is included in the evidence/ directory.
+Every technical claim in this portfolio was verified against captured evidence
+from the authors' own hardware, which is included in the evidence/ directory.
+No result is reported that was not observed on the physical system.
 ```
 
 Two things worth doing regardless of how the declaration is worded:
