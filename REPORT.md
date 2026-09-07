@@ -1188,8 +1188,20 @@ sign-in.
 | System demonstration | ~6 min | Both boards powered, serial output from each, live telemetry reaching ThingsBoard, a dashboard command changing device behaviour, and the node going stale and recovering | *[paste OneDrive share link]* |
 | Presentation | ~10 min | Slide walkthrough against the marking domains, followed by the live demonstration | *[paste OneDrive share link]* |
 
+Two screen recordings of the cloud tier are included in the repository and do not depend on
+those links:
+
+| File | Frames | Contents |
+|---|---|---|
+| `evidence/video_02_thingsboard_walkthrough.gif` | 46 | Captioned walkthrough — gateway online, node communication age counting in milliseconds, the RPC command being sent and the device reporting the change back, the `node1_*` keys, and both sensors on one chart |
+| `evidence/video_01_thingsboard_rpc_demo.gif` | 16 | Shorter capture of the RPC round trip alone |
+
+These cover the cloud tier only. They contain no footage of the boards, so they supplement the
+demonstration video rather than replacing it; the hardware shots and the physical interventions
+in §8.5 and §8.6 have to be filmed.
+
 `DEMO_PLAN.md` in the repository carries the runsheet these recordings follow, including the
-pre-flight checks and the intended order of the six demonstration steps.
+pre-flight checks and the intended order of the demonstration steps.
 
 ---
 
