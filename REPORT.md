@@ -763,7 +763,7 @@ connectivity, then the ESP-NOW link. Serial output was captured to file at each 
 | 5 | Board 2 deduplicates | `01_` | ✅ `duplicate_count=82`, `invalid=0` |
 | 6 | Board 2 reads its own sensor | `01_` | ✅ `local_ok=yes` |
 | 7 | Both readings in one JSON payload | `01_` | ✅ 231-byte combined message |
-| 8 | ThingsBoard receives live telemetry | screenshots, `02_` | ✅ device State = Active, all 10 keys present |
+| 8 | ThingsBoard receives live telemetry | screenshots, `02_` | ✅ device State = Active, all 16 keys present |
 | 9 | Logs show node/gateway/ESP-NOW/Wi-Fi/MQTT status | all | ✅ `[NODE]` / `[GATEWAY]` prefixes throughout |
 | 10 | Losing Board 1 sets `node1_online` false | `05_` | ✅ transition at the 20 s threshold |
 | 11 | Restarting Board 1 does not break dedup | `03_`, `04_`, `06_` | ✅ new `boot_id`, sequence rebased, no duplicate flood |
@@ -922,7 +922,8 @@ own, presented as a single cloud stream. The stepped appearance is DHT11 quantis
 
 ![ThingsBoard latest telemetry table listing all ten keys with timestamps](evidence/dashboard_03_latest_telemetry_10_keys.jpg)
 
-**Figure 7** — Latest telemetry, showing all ten published keys with timestamps. Both the
+**Figure 7** — Latest telemetry with timestamps, captured before the RPC and buffering keys of
+§7.6 were added, so it shows ten of the sixteen keys now published. Both the
 `gateway_*` and `node1_*` families are present in the same update, confirming that the merge
 happens at the edge rather than in the cloud.
 
