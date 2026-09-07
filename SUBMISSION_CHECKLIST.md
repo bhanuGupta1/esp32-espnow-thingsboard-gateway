@@ -39,7 +39,7 @@ Two consequences worth checking:
 |---|---|---|
 | Project portfolio | Ready | `REPORT.docx` (12 figures, 15 tables, 7.0 MB) |
 | Presentation / demo materials | Ready | `PRESENTATION.pptx` (17 slides, speaker notes, 2.2 MB) |
-| Video recordings | Partly done — see §3 | `P1_demo_cloud_and_hardware.mp4` (2:10, 9.7 MB, narrated) |
+| Video recordings | Partly done — see §3 | `P1_demo_cloud_and_hardware.mp4` (2:03, 9.8 MB, narrated) |
 | Complementary evidence | Ready | `evidence/` (11 logs, 3 photos, 8 screenshots, 1 diagram, 2 screen recordings, 1 video) |
 | Cover sheet | **Template below — needs your details** | §2 |
 | Original document, if AI-assisted | **Yours to decide and produce** | §4 |
@@ -92,7 +92,7 @@ portfolio itself, since the cover sheet has nowhere to put it.
 Required by the brief, and named explicitly in the top mark band of **two** criteria
 (Portfolio Quality, and Documentation & Supporting Materials).
 
-**`P1_demo_cloud_and_hardware.mp4`** exists: 1280×720, 2 min 10 s, **9.7 MB**, narrated. That is under
+**`P1_demo_cloud_and_hardware.mp4`** exists: 1280×720, 2 min 03 s, **9.8 MB**, narrated. That is under
 Moodle's 40 MB limit, so it is submitted directly with the portfolio and no OneDrive link is
 needed. It covers the boards at rest, the whole cloud tier including the RPC round trip, the
 dashboard filmed beside the hardware, and Board 1 being disconnected. Subtitles are burned in.

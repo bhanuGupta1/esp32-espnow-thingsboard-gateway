@@ -1183,19 +1183,19 @@ during testing, several of them did precisely that.
 The demonstration video is submitted with this portfolio rather than linked, so it needs no
 external hosting and no sign-in to view.
 
-**`P1_demo_cloud_and_hardware.mp4`** — 1280×720, 2 min 10 s, 9.7 MB, with narration. Also in
+**`P1_demo_cloud_and_hardware.mp4`** — 1280×720, 2 min 03 s, 9.8 MB, with narration. Also in
 the repository at `evidence/P1_demo_cloud_and_hardware.mp4`.
 
 | From | Segment | Contents |
 |---|---|---|
 | 0:00 | Title | |
-| 0:08 | Hardware | Both boards on the bench, each separately powered, with no wire between them |
-| 0:23 | Cloud | Gateway online, node communication age counting in milliseconds |
-| 0:30 | Walkthrough | The RPC command sent and the device reporting the change back; the `node1_*` keys; both sensors on one chart |
-| 1:03 | At the bench | The dashboard running beside the boards it reports on |
-| 1:25 | Disconnection | Board 1's USB power pulled, the intervention behind §8.5 |
-| 1:41 | Round trip | `publish_interval_ms` and `rpc_handled` after the command |
-| 1:56 | Close | |
+| 0:06 | Hardware | Both boards on the bench, each separately powered, with no wire between them |
+| 0:22 | Cloud | Gateway online, node communication age counting in milliseconds |
+| 0:27 | Walkthrough | The RPC command sent and the device reporting the change back; the `node1_*` keys; both sensors on one chart |
+| 1:09 | At the bench | The dashboard running beside the boards it reports on |
+| 1:26 | Disconnection | Board 1's USB power pulled, the intervention behind §8.5 |
+| 1:40 | Round trip | `publish_interval_ms` and `rpc_handled` after the command |
+| 1:57 | Close | |
 
 Subtitles are burned into the frames. The two source screen captures are also kept separately
 as `evidence/video_02_thingsboard_walkthrough.gif` and `evidence/video_01_thingsboard_rpc_demo.gif`.
