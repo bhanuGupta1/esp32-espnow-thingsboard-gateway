@@ -4,7 +4,10 @@
 **Student:** Bhanu Gupta
 **Student ID:** 100012452
 **Cohort:** Block 3, 2026
-**Applies to:** Part 1 Case Study Analysis and Part 2 Project Portfolio
+**Applies to:** Part 1 Case Study Analysis (individual) and Part 2 Project Portfolio (group)
+
+Part 2 was produced jointly with **Roshan Aryal (1000123440)**, an equal 50/50 split. This
+declaration covers the work as submitted; Roshan submits his own declaration for his part.
 
 ---
 
@@ -68,9 +71,9 @@ source code. Where an earlier draft asserted something the evidence did not supp
 duplicate-rejection ratio, and a claim that a compile-time assertion guaranteed more than it
 does — the claim was corrected rather than left standing.
 
-Four of the seventeen references in the case study were verified against published records.
-The remainder are standard works in the field and are marked in that document as requiring
-verification.
+The case study carries eighteen references. Four were checked directly against published
+records; the remainder are standard works in the field cited from prior familiarity rather
+than re-checked page by page.
 
 ---
 

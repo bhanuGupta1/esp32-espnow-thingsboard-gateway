@@ -37,10 +37,10 @@ Two consequences worth checking:
 
 | Deliverable | Status | File |
 |---|---|---|
-| Project portfolio | Ready | `REPORT.docx` (11 figures, 13 tables, figures embedded) |
-| Presentation / demo materials | Ready | `PRESENTATION.pptx` (16 slides, speaker notes) |
-| Video recordings | **Not done — yours to record** | see §3 |
-| Complementary evidence | Ready | `evidence/` (11 logs, 3 photos, 8 screenshots, 1 diagram, 2 screen recordings) |
+| Project portfolio | Ready | `REPORT.docx` (12 figures, 15 tables, 7.0 MB) |
+| Presentation / demo materials | Ready | `PRESENTATION.pptx` (17 slides, speaker notes, 2.2 MB) |
+| Video recordings | Partly done — see §3 | `P1_demo_cloud_and_hardware.mp4` (1:49, 7.0 MB) |
+| Complementary evidence | Ready | `evidence/` (11 logs, 3 photos, 8 screenshots, 1 diagram, 2 screen recordings, 1 video) |
 | Cover sheet | **Template below — needs your details** | §2 |
 | Original document, if AI-assisted | **Yours to decide and produce** | §4 |
 | Code | Ready | 5 sketches + private GitHub repo |
@@ -90,10 +90,22 @@ portfolio itself, since the cover sheet has nowhere to put it.
 ## 3. Video evidence
 
 Required by the brief, and named explicitly in the top mark band of **two** criteria
-(Portfolio Quality, and Documentation & Supporting Materials). Currently missing, and it is
-the single largest remaining gap.
+(Portfolio Quality, and Documentation & Supporting Materials).
 
-The brief says video may be uploaded to OneDrive with the link placed in the portfolio.
+**`P1_demo_cloud_and_hardware.mp4`** exists: 1280×720, 1 min 49 s, **7.0 MB**. That is under
+Moodle's 40 MB limit, so it is submitted directly with the portfolio and no OneDrive link is
+needed. It covers the boards at rest, the whole cloud tier including the RPC round trip, the
+dashboard filmed beside the hardware, and Board 1 being disconnected. Subtitles are burned in.
+
+Three shots are still missing, and the first matters most:
+
+| Missing shot | Why |
+|---|---|
+| The dashboard **after** the 20 s threshold | The disconnection is filmed but its consequence is not. Without it the video pulls a cable and asks the viewer to take the result on trust |
+| Board 1 plugged back in | New `boot_id`, sequence restarts, no duplicate flood — §8.6 |
+| Warming the sensor by hand | The whole chain reacting in about fifteen seconds |
+
+`VOICEOVER_SCRIPT.md` carries the narration, timed against the assembled cut.
 
 **Before you press record.** Both boards powered, and confirm the link is up — if
 `espnow_received_count` is not climbing, the gateway has roamed and the node needs repinning

@@ -1180,18 +1180,11 @@ during testing, several of them did precisely that.
 
 ## Video evidence
 
-The demonstration recordings are hosted on OneDrive. Both links are view-accessible without a
-sign-in.
+The demonstration video is submitted with this portfolio rather than linked, so it needs no
+external hosting and no sign-in to view.
 
-| Recording | Length | Contents | Link |
-|---|---|---|---|
-| System demonstration | ~6 min | Both boards powered, serial output from each, live telemetry reaching ThingsBoard, a dashboard command changing device behaviour, and the node going stale and recovering | *[paste OneDrive share link]* |
-| Presentation | ~10 min | Slide walkthrough against the marking domains, followed by the live demonstration | *[paste OneDrive share link]* |
-
-An assembled demonstration video is included in the repository and does not depend on those
-links:
-
-**`evidence/P1_demo_cloud_and_hardware.mp4`** — 1280×720, 1 min 49 s.
+**`P1_demo_cloud_and_hardware.mp4`** — 1280×720, 1 min 49 s, 7.0 MB. Also in the repository at
+`evidence/P1_demo_cloud_and_hardware.mp4`.
 
 | From | Segment | Contents |
 |---|---|---|
