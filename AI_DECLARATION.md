@@ -45,10 +45,10 @@ proposed security mitigation as inadequate, which led directly to implementing E
 encryption.
 
 **Demonstration video.** The video was assembled with AI assistance from footage filmed by the
-authors. The on-screen subtitles were written by AI, and **the spoken narration is a
-synthesised voice generated with ElevenLabs — it is not either author's voice.** The screen
-recordings of the ThingsBoard dashboard were captured by an AI agent driving the browser; the
-telemetry shown in them is genuine output from the authors' own hardware.
+authors, and the on-screen subtitles were written by AI. The screen recordings of the
+ThingsBoard dashboard were captured by an AI agent driving the browser; the telemetry shown in
+them is genuine output from the authors' own hardware. **The spoken narration is a human
+recording, not synthesised.**
 
 **Debugging assistance.** Including diagnosis of the ESP-IDF 5.5 callback signature change,
 the institutional Wi-Fi authentication realm, and the channel roam described in the portfolio.

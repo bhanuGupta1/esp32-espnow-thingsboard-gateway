@@ -1197,8 +1197,7 @@ the repository at `evidence/P1_demo_cloud_and_hardware.mp4`.
 | 1:41 | Round trip | `publish_interval_ms` and `rpc_handled` after the command |
 | 1:56 | Close | |
 
-Subtitles are burned into the frames, and the narration is a synthesised voice (see the
-generative AI declaration submitted with this portfolio). The two source screen captures are also kept separately
+Subtitles are burned into the frames. The two source screen captures are also kept separately
 as `evidence/video_02_thingsboard_walkthrough.gif` and `evidence/video_01_thingsboard_rpc_demo.gif`.
 
 What the assembled video does **not** contain is the physical interventions: warming the sensor
