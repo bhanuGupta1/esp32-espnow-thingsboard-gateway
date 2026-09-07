@@ -1,8 +1,10 @@
 # P1 — ESP-NOW Sensor Mesh with Cloud Bridge
 
 **Course:** IA736001 Internet of Things and Cloud Computing
-**Authors:** Bhanu Gupta, [ partner name ]
+**Authors:** Bhanu Gupta (100012452) and Roshan Aryal (1000123440)
 **Date:** 3 August 2026
+**Contributions:** Both authors contributed equally, a 50/50 split across design,
+implementation, hardware testing and documentation. Section 11.1 is a joint reflection.
 
 ---
 
