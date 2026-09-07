@@ -952,6 +952,19 @@ share one timestamp and `node1_online` is `true`. These values originate on a bo
 network connection of its own; they reached the cloud only by ESP-NOW to the gateway and MQTT
 onward, which is the central claim of the project reduced to five rows.
 
+![Both temperature traces on one full-width chart, gateway in blue and remote node in green](evidence/dashboard_08_mesh_both_traces.jpg)
+
+**Figure 12** — The second dashboard, *P1 ESP-NOW Sensor Mesh*, which exists to put the two
+sources side by side rather than to summarise device health. Blue is Board 2's own sensor at
+24.2 °C; green is Board 1, arriving by radio, at 23.7 °C. The green trace begins part way along
+because that is when the link was restored after the channel roam described in §8.8 — the gap
+is the outage, not a rendering artefact.
+
+An animated capture of the dashboard responding to a command is included as
+`evidence/video_01_thingsboard_rpc_demo.gif`: live telemetry, the *Fast publish (2 s)* button
+being pressed, and `publish_interval_ms` and `rpc_handled` changing in the device's own
+telemetry as a result.
+
 ---
 
 ## 9. Limitations

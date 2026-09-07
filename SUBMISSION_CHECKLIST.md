@@ -40,7 +40,7 @@ Two consequences worth checking:
 | Project portfolio | Ready | `REPORT.docx` (11 figures, 13 tables, figures embedded) |
 | Presentation / demo materials | Ready | `PRESENTATION.pptx` (16 slides, speaker notes) |
 | Video recordings | **Not done — yours to record** | see §3 |
-| Complementary evidence | Ready | `evidence/` (11 logs, 3 photos, 7 screenshots, 1 diagram) |
+| Complementary evidence | Ready | `evidence/` (11 logs, 3 photos, 8 screenshots, 1 diagram, 1 screen recording) |
 | Cover sheet | **Template below — needs your details** | §2 |
 | Original document, if AI-assisted | **Yours to decide and produce** | §4 |
 | Code | Ready | 5 sketches + private GitHub repo |
