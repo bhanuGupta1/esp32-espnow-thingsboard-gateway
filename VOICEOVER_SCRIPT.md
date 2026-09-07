@@ -1,6 +1,6 @@
 # Voiceover script — `evidence/P1_demo_cloud_and_hardware.mp4`
 
-Timed against the assembled video, which runs **1:20.9**. Each block gives the window it has
+Timed against the assembled video, which runs **1:49.1**. Each block gives the window it has
 to fit in and a word count. Read at a normal pace, around 2.5 words a second, and you will
 land inside every window with room to breathe.
 
@@ -47,13 +47,37 @@ deliberate, a rushed sentence does not.
 
 ---
 
-## 0:57 – 1:01 · Recap card *(13 words, ~4 s)*
+## 0:57 – 1:01 · "At the bench" card *(10 words, ~4 s)*
+
+> That is the cloud view. This is the bench it comes from.
+
+---
+
+## 1:01 – 1:16 · Dashboard beside the boards *(36 words, ~15 s)*
+
+> Here is the same dashboard running next to the hardware. Node one communication age was
+> counting in milliseconds while this was filmed, so the board on the desk is the one feeding
+> that number.
+
+---
+
+## 1:16 – 1:25 · Board 1 disconnected *(22 words, ~9 s)*
+
+> Now I pull Board one's power. The gateway keeps publishing its own readings, and after twenty
+> seconds node one online goes false.
+
+*The dashboard flipping to false is not in this footage — the log evidence is in section 8.5.
+Do not claim on camera that the video shows it.*
+
+---
+
+## 1:25 – 1:29 · Recap card *(13 words, ~4 s)*
 
 > The same round trip once more, this time with the counters in view.
 
 ---
 
-## 1:01 – 1:16 · RPC round trip *(36 words, ~15 s)*
+## 1:29 – 1:44 · RPC round trip *(36 words, ~15 s)*
 
 > Publish interval is two thousand milliseconds, not the ten thousand compiled into the
 > firmware, and the handled count has incremented. Out-of-range values are refused rather than
@@ -61,7 +85,7 @@ deliberate, a rushed sentence does not.
 
 ---
 
-## 1:16 – 1:21 · Closing card *(30 words, ~5 s — read briskly)*
+## 1:44 – 1:49 · Closing card *(30 words, ~5 s — read briskly)*
 
 > Two boards, no wire, one cloud stream: edge aggregation, deduplication, encrypted ESP-NOW,
 > and control in both directions.
@@ -89,8 +113,12 @@ responds to the physical world:
 
 | Shot | Why it matters |
 |---|---|
-| Warming the sensor by hand | Shows the whole chain — sensor, radio, gateway, MQTT, cloud — reacting in about fifteen seconds |
-| Unplugging Board 1 | `node1_online` flips false after the 20 s threshold; proves the stale detection in §8.5 |
-| Plugging it back in | New `boot_id`, sequence restarts, accepted with no duplicate flood — §8.6 |
+| The dashboard **after** the 20 s threshold | The disconnection is filmed, but the payoff is not. Film the screen showing `node1_online` false and the last known temperature still published |
+| Plugging Board 1 back in | New `boot_id`, sequence restarts, accepted with no duplicate flood — §8.6 |
+| Warming the sensor by hand | The whole chain — sensor, radio, gateway, MQTT, cloud — reacting in about fifteen seconds |
+
+The first of these is the one worth getting. Without it the video shows a cable being pulled
+and asks the viewer to take the consequence on trust, which is exactly the kind of claim the
+rest of this portfolio avoids making.
 
 Send me those clips and I will cut them into the same timeline.
