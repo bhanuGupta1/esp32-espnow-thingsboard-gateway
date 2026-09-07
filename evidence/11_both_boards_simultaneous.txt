@@ -1,0 +1,68 @@
+Both boards captured simultaneously, 2026-09-07.
+
+A single PowerShell loop polled COM3 and COM4 in the same process, timestamping
+each line as it arrived. Every other log in this directory is a single-port
+capture, so this is the only evidence that shows one packet at both ends of the
+radio link with a common clock.
+
+What it demonstrates:
+
+  - The same sequence number leaving Board 1 and arriving at Board 2. seq=12 is
+    acknowledged on the node at 13:20:24.757 and logged by the gateway at
+    13:20:24.758 - one millisecond, which is the ESP-NOW round trip including
+    the link-layer ack.
+  - "OK (link-layer ack received)" on the node is corroborated by an actual
+    arrival on the gateway, rather than being taken on trust.
+  - node1_sequence in the MQTT payload matches the seq the node just sent, so
+    edge aggregation is carrying the current reading, not a cached one.
+  - invalid=0, wrong_sender=0, duplicates=0 throughout.
+
+Context: this capture was taken immediately after recovering from a channel
+roam. The gateway had moved to channel 6 while the node was pinned to 1, and
+the first attempt at this capture recorded the failure instead - the node
+reporting "FAILED (no ack)" with total_fail=14 while the gateway published its
+own readings normally with node1_online=false. That failing capture is the
+opening of this file's story and the reason section 9 treats the roam as a
+standing property of the network rather than an incident.
+
+--------------------------------------------------------------------------
+13:20:19.820  BOARD 1 node     [NODE] tx seq=11 temperature=23.8 C humidity=44.0 % uptime=55024 ms
+13:20:19.896  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=11
+13:20:19.897  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=11 boot_id=3936983735 temperature=23.8 C humidity=44.0 % node_uptime=55024 ms ttl=3 hops=0
+13:20:19.900  BOARD 2 gateway  [GATEWAY] local_ok=yes  node1_online=yes  node1_age=92 ms  received=11  duplicates=0  invalid=0  wrong_sender=0  buffered=0
+13:20:19.903  BOARD 2 gateway  [GATEWAY] MQTT published 327 bytes: {"gateway_temperature":24.1,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":23.8,"node1_humidity":44.0,"node1_sequence":11,"node1_age_ms":92,"node1_online":true,"duplicate_count":0,"espnow_received_count":11,"buffered_now":0,"buffered_total":0,"dropped_total":0,"rpc_handled":0,"publish_interval_ms":10000}
+13:20:24.754  BOARD 1 node     [NODE] tx seq=12 temperature=23.8 C humidity=44.0 % uptime=60024 ms
+13:20:24.757  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=12
+13:20:24.758  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=12 boot_id=3936983735 temperature=23.8 C humidity=44.0 % node_uptime=60024 ms ttl=3 hops=0
+13:20:29.742  BOARD 1 node     [NODE] tx seq=13 temperature=23.8 C humidity=44.0 % uptime=65024 ms
+13:20:29.774  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=13
+13:20:29.777  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=13 boot_id=3936983735 temperature=23.8 C humidity=44.0 % node_uptime=65024 ms ttl=3 hops=0
+13:20:29.852  BOARD 2 gateway  [GATEWAY] local_ok=yes  node1_online=yes  node1_age=92 ms  received=13  duplicates=0  invalid=0  wrong_sender=0  buffered=0
+13:20:29.897  BOARD 2 gateway  [GATEWAY] MQTT published 327 bytes: {"gateway_temperature":24.1,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":23.8,"node1_humidity":44.0,"node1_sequence":13,"node1_age_ms":92,"node1_online":true,"duplicate_count":0,"espnow_received_count":13,"buffered_now":0,"buffered_total":0,"dropped_total":0,"rpc_handled":0,"publish_interval_ms":10000}
+13:20:34.754  BOARD 1 node     [NODE] tx seq=14 temperature=23.8 C humidity=44.0 % uptime=70024 ms
+13:20:34.759  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=14
+13:20:34.760  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=14 boot_id=3936983735 temperature=23.8 C humidity=44.0 % node_uptime=70024 ms ttl=3 hops=0
+13:20:39.752  BOARD 1 node     [NODE] tx seq=15 temperature=23.8 C humidity=44.0 % uptime=75024 ms
+13:20:39.753  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=15
+13:20:39.755  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=15 boot_id=3936983735 temperature=23.8 C humidity=44.0 % node_uptime=75024 ms ttl=3 hops=0
+13:20:39.857  BOARD 2 gateway  [GATEWAY] local_ok=yes  node1_online=yes  node1_age=92 ms  received=15  duplicates=0  invalid=0  wrong_sender=0  buffered=0
+13:20:39.890  BOARD 2 gateway  [GATEWAY] MQTT published 327 bytes: {"gateway_temperature":24.1,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":23.8,"node1_humidity":44.0,"node1_sequence":15,"node1_age_ms":92,"node1_online":true,"duplicate_count":0,"espnow_received_count":15,"buffered_now":0,"buffered_total":0,"dropped_total":0,"rpc_handled":0,"publish_interval_ms":10000}
+13:20:44.758  BOARD 1 node     [NODE] tx seq=16 temperature=23.8 C humidity=44.0 % uptime=80024 ms
+13:20:44.759  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=16
+13:20:44.759  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=16 boot_id=3936983735 temperature=23.8 C humidity=44.0 % node_uptime=80024 ms ttl=3 hops=0
+13:20:49.761  BOARD 1 node     [NODE] tx seq=17 temperature=23.8 C humidity=44.0 % uptime=85024 ms
+13:20:49.764  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=17
+13:20:49.764  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=17 boot_id=3936983735 temperature=23.8 C humidity=44.0 % node_uptime=85024 ms ttl=3 hops=0
+13:20:49.868  BOARD 2 gateway  [GATEWAY] local_ok=yes  node1_online=yes  node1_age=92 ms  received=17  duplicates=0  invalid=0  wrong_sender=0  buffered=0
+13:20:49.915  BOARD 2 gateway  [GATEWAY] MQTT published 327 bytes: {"gateway_temperature":24.1,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":23.8,"node1_humidity":44.0,"node1_sequence":17,"node1_age_ms":92,"node1_online":true,"duplicate_count":0,"espnow_received_count":17,"buffered_now":0,"buffered_total":0,"dropped_total":0,"rpc_handled":0,"publish_interval_ms":10000}
+13:20:54.776  BOARD 1 node     [NODE] tx seq=18 temperature=23.8 C humidity=45.0 % uptime=90024 ms
+13:20:54.777  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=18
+13:20:54.778  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=18 boot_id=3936983735 temperature=23.8 C humidity=45.0 % node_uptime=90024 ms ttl=3 hops=0
+13:20:59.753  BOARD 1 node     [NODE] tx seq=19 temperature=23.8 C humidity=45.0 % uptime=95024 ms
+13:20:59.756  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=19
+13:20:59.758  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=19 boot_id=3936983735 temperature=23.8 C humidity=45.0 % node_uptime=95024 ms ttl=3 hops=0
+13:20:59.843  BOARD 2 gateway  [GATEWAY] local_ok=yes  node1_online=yes  node1_age=92 ms  received=19  duplicates=0  invalid=0  wrong_sender=0  buffered=0
+13:20:59.874  BOARD 2 gateway  [GATEWAY] MQTT published 327 bytes: {"gateway_temperature":24.1,"gateway_humidity":54.0,"gateway_sensor_ok":true,"node1_temperature":23.8,"node1_humidity":45.0,"node1_sequence":19,"node1_age_ms":92,"node1_online":true,"duplicate_count":0,"espnow_received_count":19,"buffered_now":0,"buffered_total":0,"dropped_total":0,"rpc_handled":0,"publish_interval_ms":10000}
+13:21:04.759  BOARD 1 node     [NODE] tx seq=20 temperature=23.8 C humidity=45.0 % uptime=100024 ms
+13:21:04.761  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)  total_ok=20
+13:21:04.763  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=20 boot_id=3936983735 temperature=23.8 C humidity=45.0 % node_uptime=100024 ms ttl=3 hops=0

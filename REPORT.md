@@ -52,7 +52,7 @@ reports what was built, and the two align on every substantive point.
 | Edge aggregation to reduce cloud traffic | Two 26-byte frames every 5 s become one publish every 10 s, §8.3 |
 | Deduplication on `(src_id, boot_id, seq)` | §6, with a node restart correctly distinguished from a replay |
 | Link encryption with a pre-shared key pair | §7.9.3; PMK plus per-peer LMK, verified on hardware |
-| ThingsBoard PaaS for registry, ingestion and dashboards | §7.5 and §8.9 |
+| ThingsBoard PaaS for registry, ingestion and dashboards | §7.5 and §8.10 |
 
 Two differences are worth stating plainly rather than leaving for a reader to notice.
 
@@ -64,7 +64,7 @@ demonstrated. §3 sets out the substitution and its consequences in full.
 work on the cloud leg. Two capabilities were added afterwards that it does not describe:
 server-to-device RPC, so the cloud can change device behaviour rather than only observe it,
 and a store-and-forward buffer that preserves telemetry across a broker outage. Both are
-specified in §7.6 and verified on hardware in §8.8.
+specified in §7.6 and verified on hardware in §8.9.
 
 ---
 
@@ -769,6 +769,7 @@ connectivity, then the ESP-NOW link. Serial output was captured to file at each 
 | 11 | Restarting Board 1 does not break dedup | `03_`, `04_`, `06_` | ✅ new `boot_id`, sequence rebased, no duplicate flood |
 | 12 | A dashboard command changes device behaviour | `10_`, Figure 9 | ✅ `setPublishInterval` accepted and applied; `rpc_handled` incremented |
 | 13 | Telemetry survives a broker outage | `10_` | ✅ `buffered_total=4`, `dropped_total=0`, `buffered_now=0` — buffered then flushed, none lost |
+| 14 | The ack on the node corresponds to a real arrival on the gateway | `11_` | ✅ same `seq` at both ends on one clock, 1 ms apart |
 
 ### 8.3 Combined payload
 
@@ -844,7 +845,37 @@ from 21.4 °C to 28.9 °C with humidity falling from 48 % to 31 %, then relaxed 
 ambient at a comparable rate once released. Both directions tracked with similar lag,
 confirming the readings are live rather than cached at any point in the chain.
 
-### 8.8 Bidirectional control
+### 8.8 One packet, both ends
+
+Every capture in §8.3 to §8.7 reads one serial port at a time, which means the node's
+"link-layer ack received" and the gateway's "ESP-NOW rx" are two separate observations that
+have to be trusted to refer to the same packet. This test removes that gap: a single process
+polled both ports and timestamped each line against one clock.
+
+```
+13:20:24.754  BOARD 1 node     [NODE] tx seq=12 temperature=23.8 C humidity=44.0 %
+13:20:24.757  BOARD 1 node     [NODE] send to 44:1D:64:F4:F1:C8 : OK x1 (link-layer ack received)
+13:20:24.758  BOARD 2 gateway  [GATEWAY] ESP-NOW rx from 44:1D:64:F5:FA:24  node=1 seq=12 ... ttl=3 hops=0
+```
+
+The gateway logs the arrival **one millisecond** after the node logs the acknowledgement, and
+the sequence numbers match. Three things follow. The ack the node reports is a real delivery
+rather than an optimistic local result; the end-to-end radio latency is on the order of a
+millisecond, which is consistent with a link-layer acknowledged unicast and far below the 5 s
+send interval; and `node1_sequence` in the subsequent MQTT payload equals the sequence just
+transmitted, so the aggregation is carrying the current reading rather than a cached one.
+
+Counters stayed at `invalid=0`, `wrong_sender=0`, `duplicates=0` for the whole capture. The
+full log is `evidence/11_both_boards_simultaneous.txt`.
+
+The capture is also a record of the failure that preceded it. The first attempt recorded the
+node reporting `FAILED (no ack)` with `total_fail=14` while the gateway published its own
+readings normally with `node1_online=false` — the channel-roam signature described in §9,
+encountered again, with the gateway on channel 6 and the node still pinned to 1 from the
+previous session. Recovery was the documented procedure: read the channel from the gateway's
+boot banner, update `ESPNOW_CHANNEL`, re-upload to the node.
+
+### 8.9 Bidirectional control
 
 Sections 8.3 to 8.7 test the upward path: sensor to gateway to cloud. This section tests the
 downward one, which is what separates a managed device from a telemetry feed.
@@ -875,7 +906,7 @@ the broker was unreachable were held, and all four were later flushed with none 
 Section 7.6 argued the design was bounded, ordered and recent-biased; this is the measurement
 that it also works.
 
-### 8.9 Cloud dashboard
+### 8.10 Cloud dashboard
 
 ![ThingsBoard time-series chart showing both temperature traces on one axis](evidence/dashboard_01_temperature_both_boards.jpg)
 
