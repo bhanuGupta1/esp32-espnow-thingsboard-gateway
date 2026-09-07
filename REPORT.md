@@ -1188,17 +1188,27 @@ sign-in.
 | System demonstration | ~6 min | Both boards powered, serial output from each, live telemetry reaching ThingsBoard, a dashboard command changing device behaviour, and the node going stale and recovering | *[paste OneDrive share link]* |
 | Presentation | ~10 min | Slide walkthrough against the marking domains, followed by the live demonstration | *[paste OneDrive share link]* |
 
-Two screen recordings of the cloud tier are included in the repository and do not depend on
-those links:
+An assembled demonstration video is included in the repository and does not depend on those
+links:
 
-| File | Frames | Contents |
+**`evidence/P1_demo_cloud_and_hardware.mp4`** — 1280×720, 1 min 21 s.
+
+| From | Segment | Contents |
 |---|---|---|
-| `evidence/video_02_thingsboard_walkthrough.gif` | 46 | Captioned walkthrough — gateway online, node communication age counting in milliseconds, the RPC command being sent and the device reporting the change back, the `node1_*` keys, and both sensors on one chart |
-| `evidence/video_01_thingsboard_rpc_demo.gif` | 16 | Shorter capture of the RPC round trip alone |
+| 0:00 | Title | |
+| 0:05 | Hardware | Both boards on the bench, each separately powered, with no wire between them |
+| 0:20 | Cloud | Gateway online, node communication age counting in milliseconds |
+| 0:24 | Walkthrough | The RPC command sent and the device reporting the change back; the `node1_*` keys; both sensors on one chart |
+| 1:01 | Round trip | `publish_interval_ms` and `rpc_handled` after the command |
+| 1:16 | Close | |
 
-These cover the cloud tier only. They contain no footage of the boards, so they supplement the
-demonstration video rather than replacing it; the hardware shots and the physical interventions
-in §8.5 and §8.6 have to be filmed.
+Subtitles are burned into the frames. The two source screen captures are also kept separately
+as `evidence/video_02_thingsboard_walkthrough.gif` and `evidence/video_01_thingsboard_rpc_demo.gif`.
+
+What the assembled video does **not** contain is the physical interventions: warming the sensor
+by hand, and disconnecting and restoring Board 1. Those produce the results reported in §8.5
+and §8.6 and are filmed separately. `VOICEOVER_SCRIPT.md` carries the narration script timed
+against the segments above.
 
 `DEMO_PLAN.md` in the repository carries the runsheet these recordings follow, including the
 pre-flight checks and the intended order of the demonstration steps.
