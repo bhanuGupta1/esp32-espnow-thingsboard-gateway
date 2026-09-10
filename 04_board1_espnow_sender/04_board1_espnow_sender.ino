@@ -44,7 +44,7 @@ static uint8_t GATEWAY_MAC[6] = { 0x44, 0x1D, 0x64, 0xF4, 0xF1, 0xC8 };
 // on the gateway carried on looking perfectly healthy. eduroam has access
 // points on channels 1, 6 and 11. Always read the channel off the gateway's
 // boot banner before a demonstration.
-static const uint8_t ESPNOW_CHANNEL = 6;
+static const uint8_t ESPNOW_CHANNEL = 1;
 
 // How often a reading is transmitted.
 static const uint32_t SEND_INTERVAL_MS = 5000;

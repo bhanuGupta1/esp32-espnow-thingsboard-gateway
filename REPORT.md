@@ -204,6 +204,13 @@ rather than on sensing, that is close to a neutral trade.
 
 ## 4. Architecture
 
+![System block diagram showing the sensing, edge and cloud tiers and the links between them](evidence/fig_block_diagram.png)
+
+**Figure 5** — The system as three tiers. Board 2 is the only device present on both networks,
+and that is the whole mechanism: it holds the eduroam credentials and the ESP-NOW keys at the
+same time, so Board 1 reaches the cloud without ever joining it. The ASCII topology below gives
+the same structure with the addressing shown explicitly.
+
 ### 4.1 Topology
 
 ```
@@ -767,7 +774,7 @@ connectivity, then the ESP-NOW link. Serial output was captured to file at each 
 | 9 | Logs show node/gateway/ESP-NOW/Wi-Fi/MQTT status | all | ✅ `[NODE]` / `[GATEWAY]` prefixes throughout |
 | 10 | Losing Board 1 sets `node1_online` false | `05_` | ✅ transition at the 20 s threshold |
 | 11 | Restarting Board 1 does not break dedup | `03_`, `04_`, `06_` | ✅ new `boot_id`, sequence rebased, no duplicate flood |
-| 12 | A dashboard command changes device behaviour | `10_`, Figure 9 | ✅ `setPublishInterval` accepted and applied; `rpc_handled` incremented |
+| 12 | A dashboard command changes device behaviour | `10_`, Figure 10 | ✅ `setPublishInterval` accepted and applied; `rpc_handled` incremented |
 | 13 | Telemetry survives a broker outage | `10_` | ✅ `buffered_total=4`, `dropped_total=0`, `buffered_now=0` — buffered then flushed, none lost |
 | 14 | The ack on the node corresponds to a real arrival on the gateway | `11_` | ✅ same `seq` at both ends on one clock, 1 ms apart |
 
@@ -910,7 +917,7 @@ that it also works.
 
 ![ThingsBoard time-series chart showing both temperature traces on one axis](evidence/dashboard_01_temperature_both_boards.jpg)
 
-**Figure 5** — Both temperature traces on one axis. Blue is the gateway's local sensor; green
+**Figure 6** — Both temperature traces on one axis. Blue is the gateway's local sensor; green
 is the remote node, arriving via ESP-NOW. This is the clearest single visualisation of edge
 aggregation: two physically separate sensors, one of which has no network connection of its
 own, presented as a single cloud stream. The stepped appearance is DHT11 quantisation
@@ -918,44 +925,44 @@ own, presented as a single cloud stream. The stepped appearance is DHT11 quantis
 
 ![ThingsBoard time-series chart showing both humidity traces](evidence/dashboard_02_humidity_both_boards.jpg)
 
-**Figure 6** — Both humidity traces. The same two sources, second measurand.
+**Figure 7** — Both humidity traces. The same two sources, second measurand.
 
 ![ThingsBoard latest telemetry table listing all ten keys with timestamps](evidence/dashboard_03_latest_telemetry_10_keys.jpg)
 
-**Figure 7** — Latest telemetry with timestamps, captured before the RPC and buffering keys of
+**Figure 8** — Latest telemetry with timestamps, captured before the RPC and buffering keys of
 §7.6 were added, so it shows ten of the sixteen keys now published. Both the
 `gateway_*` and `node1_*` families are present in the same update, confirming that the merge
 happens at the edge rather than in the cloud.
 
 ![ThingsBoard device list showing P1 Gateway with State set to Active](evidence/dashboard_04_device_state_active.jpg)
 
-**Figure 8** — The device registered as **Active**. ThingsBoard sets this state only on a live
+**Figure 9** — The device registered as **Active**. ThingsBoard sets this state only on a live
 connection, so the badge is independent confirmation of cloud connectivity.
 
 ![ThingsBoard latest telemetry showing publish_interval_ms set to 2000 and rpc_handled at 1](evidence/dashboard_05_rpc_publish_interval_2000.jpg)
 
-**Figure 9** — The result of a dashboard command, read back from the cloud. `publish_interval_ms`
+**Figure 10** — The result of a dashboard command, read back from the cloud. `publish_interval_ms`
 is 2000 rather than the compiled-in default of 10000, and `rpc_handled` has incremented to 1.
 Because these values are reported *by the device* in its own telemetry, they confirm the command
 was received and applied, not merely that the dashboard sent it.
 
 ![P1 Gateway Dashboard with the gateway online, node communication age live and three RPC command buttons](evidence/dashboard_06_full_system_live.jpg)
 
-**Figure 10** — The complete system in operation. The gateway is **Online**, its own sensor reads
+**Figure 11** — The complete system in operation. The gateway is **Online**, its own sensor reads
 29.8 °C and 47 %, *Node 1 Communication Age* is counting in milliseconds rather than sitting
 stale, no alarms are raised, and the three RPC command buttons are available to an operator.
 This single view covers both directions of the link.
 
 ![Latest telemetry filtered to the node1 keys, all timestamped identically with node1_online true](evidence/dashboard_07_node1_keys_live.jpg)
 
-**Figure 11** — The cloud's view of the remote node, filtered to the `node1_*` keys. All five
+**Figure 12** — The cloud's view of the remote node, filtered to the `node1_*` keys. All five
 share one timestamp and `node1_online` is `true`. These values originate on a board with no
 network connection of its own; they reached the cloud only by ESP-NOW to the gateway and MQTT
 onward, which is the central claim of the project reduced to five rows.
 
 ![Both temperature traces on one full-width chart, gateway in blue and remote node in green](evidence/dashboard_08_mesh_both_traces.jpg)
 
-**Figure 12** — The second dashboard, *P1 ESP-NOW Sensor Mesh*, which exists to put the two
+**Figure 13** — The second dashboard, *P1 ESP-NOW Sensor Mesh*, which exists to put the two
 sources side by side rather than to summarise device health. Blue is Board 2's own sensor at
 24.2 °C; green is Board 1, arriving by radio, at 23.7 °C. The green trace begins part way along
 because that is when the link was restored after the channel roam described in §8.8 — the gap
